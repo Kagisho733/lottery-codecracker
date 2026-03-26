@@ -1,243 +1,259 @@
 # ===============================
-# LOTTERY AI SUPER SYSTEM PRO DASHBOARD - SaaS Edition
+# LOTTERY AI PRO – FOUR SECTION SAAS (1 Set per Ball Count)
 # ===============================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, json, random
+import os, json
 from datetime import datetime
 from collections import Counter
-from sklearn.ensemble import RandomForestClassifier
 import plotly.express as px
-import plotly.graph_objects as go
 
-# -------------------------------
-# PAGE CONFIG
-# -------------------------------
-st.set_page_config(
-    page_title="🎰 Lottery AI PRO SaaS",
-    page_icon="🎲",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="🎰 Lottery AI PRO - 4 Sections", layout="wide")
 
-# -------------------------------
-# FILE STORAGE
-# -------------------------------
 DRAW_FILE = "draws.json"
+RL_FILE = "rl_model.json"
+NUMBERS = list(range(1, 25))
 
+# -------------------------------
+# STORAGE FUNCTIONS
+# -------------------------------
 def save_draw(draw):
-    data=[]
+    data = []
     if os.path.exists(DRAW_FILE):
-        with open(DRAW_FILE,"r") as f: data=json.load(f)
-    data.append({"numbers": draw,"date": str(datetime.now())})
-    with open(DRAW_FILE,"w") as f: json.dump(data,f)
+        data = json.load(open(DRAW_FILE))
+    data.append({"numbers": draw, "date": str(datetime.now())})
+    json.dump(data, open(DRAW_FILE, "w"))
 
 def load_draws():
-    if not os.path.exists(DRAW_FILE): return []
-    with open(DRAW_FILE,"r") as f: data=json.load(f)
-    return [d.get("numbers",[]) for d in data]
-
-def reset_data():
-    if os.path.exists(DRAW_FILE): os.remove(DRAW_FILE)
+    if not os.path.exists(DRAW_FILE):
+        return []
+    return json.load(open(DRAW_FILE))
 
 # -------------------------------
-# ANALYSIS & AI
+# REINFORCEMENT LEARNING MODEL
 # -------------------------------
-def analyze(draws):
-    numbers=list(range(1,25))
-    all_nums=[n for d in draws for n in d]
-    freq=Counter(all_nums)
-    df=pd.DataFrame({"Number":numbers,"Frequency":[freq.get(n,0) for n in numbers]})
-    df["Freq_norm"]=df["Frequency"]/max(df["Frequency"].max(),1)
-    most=df.sort_values("Frequency",ascending=False).head(5)
-    least=df.sort_values("Frequency",ascending=True).head(5)
-    return df, most, least
+def init_rl():
+    return {str(n): {"a":1,"b":1} for n in NUMBERS}
 
-def train_model(draws):
-    if len(draws)<5: return None
-    nums=list(range(1,25)); X=[]; y=[]
-    for i in range(1,len(draws)):
-        prev,curr=draws[i-1],draws[i]
-        X.append([1 if n in prev else 0 for n in nums])
-        y.append([1 if n in curr else 0 for n in nums])
-    model=RandomForestClassifier()
-    model.fit(X,y)
-    return model
+def load_rl():
+    if not os.path.exists(RL_FILE):
+        return init_rl()
+    data = json.load(open(RL_FILE))
+    return {str(k):v for k,v in data.items()}
 
-def ai_scores(draws,model):
-    nums=list(range(1,25))
-    last=draws[-1]; X=[[1 if n in last else 0 for n in nums]]
-    probs=model.predict_proba(X)
-    scores={}
-    for i,n in enumerate(nums):
-        scores[n]=probs[i][0][1] if len(probs[i][0])>1 else 0
-    return scores
+def save_rl(m):
+    json.dump(m, open(RL_FILE,"w"))
 
-def calculate_probabilities(df):
-    total=df["Hybrid"].sum()
-    df["Prob"]=df["Hybrid"]/total if total>0 else 0
-    return df
+def update_rl(m, draw):
+    s = set(draw)
+    for k in m:
+        n = int(k)
+        if n in s:
+            m[k]["a"] += 2
+        else:
+            m[k]["b"] += 1
+    return m
 
-def ticket_probability(ticket,df):
-    probs=df.set_index("Number")["Prob"].to_dict(); p=1
-    for n in ticket: p*=probs.get(n,0.0001)
-    return p
-
-def expected_value(prob,payout): return prob*payout
-
-def ticket_risk(ticket,df):
-    scores=df.set_index("Number").loc[ticket]["Hybrid"]
-    return np.std(scores)
-
-def generate_ticket(df,count):
-    hot=df.sort_values("Hybrid",ascending=False).head(12)["Number"].tolist()
-    return sorted(random.sample(hot,count))
+def rl_probs(m):
+    p = {int(n): np.random.beta(v["a"],v["b"]) for n,v in m.items()}
+    t = sum(p.values())
+    return {n:v/t for n,v in p.items()}
 
 # -------------------------------
-# COLOR FUNCTION
+# PROBABILITY ENGINE
 # -------------------------------
-def card_color(is_best,risk,min_risk,max_risk):
-    if is_best: return "#4CAF50"
-    elif risk==min_risk: return "#2196F3"
-    elif risk==max_risk: return "#F44336"
-    else: return "#FFC107"
+def build_model(draws):
+    only_draws = [d["numbers"] for d in draws]
+
+    freq = Counter(n for d in only_draws for n in d)
+    total = len(only_draws)*12
+    freq_p = {n:freq[n]/total for n in NUMBERS}
+
+    rec = {n:0 for n in NUMBERS}
+    for i,d in enumerate(reversed(only_draws)):
+        w = 0.9**i
+        for n in d: rec[n] += w
+    rec_p = {n: rec[n]/sum(rec.values()) for n in NUMBERS}
+
+    trans = {n:Counter() for n in NUMBERS}
+    for i in range(1,len(only_draws)):
+        for p in only_draws[i-1]:
+            for c in only_draws[i]:
+                trans[p][c] += 1
+
+    trans_p = {}
+    for n in NUMBERS:
+        t = sum(trans[n].values()) or 1
+        trans_p[n] = {k:v/t for k,v in trans[n].items()}
+
+    return only_draws, freq, freq_p, rec, rec_p, trans_p
+
+def final_probs(draws,freq_p,rec_p,trans_p):
+    last = draws[-1] if draws else []
+    scores = {}
+    for n in NUMBERS:
+        base = 0.4*freq_p[n] + 0.3*rec_p[n]
+        t = np.mean([trans_p.get(p,{}).get(n,0) for p in last]) if last else 0
+        scores[n] = 0.7*base + 0.3*t
+    total = sum(scores.values())
+    return {n: v/total for n,v in scores.items()}
+
+def combine(base,rl):
+    c = {n:0.6*base[n] + 0.4*rl[n] for n in NUMBERS}
+    t = sum(c.values())
+    return {n:v/t for n,v in c.items()}
 
 # -------------------------------
-# SIDEBAR NAVIGATION
+# TICKET GENERATOR
 # -------------------------------
-st.sidebar.title("🎰 Lottery AI SaaS PRO")
-page=st.sidebar.radio("Navigation",["Dashboard","Add Draw","Reset Database","History"])
-theme=st.sidebar.radio("Theme",["💡 Light","🌙 Dark"])
+def gen_ticket(p,c):
+    nums = list(p.keys())
+    w = np.array([p[n] for n in nums])
+    w /= w.sum()
+    return sorted(np.random.choice(nums,c,False,p=w))
 
 # -------------------------------
-# THEME STYLING
+# TICKET EXPLANATION
 # -------------------------------
-if theme=="🌙 Dark":
-    st.markdown("""<style>.stApp{background-color:#121212;color:#fff;}</style>""",unsafe_allow_html=True)
-else:
-    st.markdown("""<style>.stApp{background-color:#f5f7fa;color:#333;}</style>""",unsafe_allow_html=True)
+def explain_ticket(ticket, freq, rec, trans_p, rl_model, last_draw):
+    explanation = []
+    for n in ticket:
+        reasons = []
+        if freq[n] > np.mean(list(freq.values())):
+            reasons.append("hot")
+        if rec[n] > np.mean(list(rec.values())):
+            reasons.append("recent")
+        if last_draw:
+            trans_score = np.mean([trans_p.get(p, {}).get(n,0) for p in last_draw])
+            if trans_score > 0.05:
+                reasons.append("follows pattern")
+        if rl_model.get(str(n), {"a":1,"b":1})["a"] > rl_model.get(str(n), {"a":1,"b":1})["b"]:
+            reasons.append("AI learned")
+        if reasons:
+            explanation.append(f"{n}: {', '.join(reasons)}")
+    return explanation
 
 # -------------------------------
-# ADD DRAW PAGE
+# UI STYLE
+# -------------------------------
+st.markdown("""
+<style>
+.card {
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 15px;
+    color: white;
+    box-shadow: 0px 6px 15px rgba(0,0,0,0.3);
+    transition: transform 0.2s, box-shadow 0.3s;
+}
+.card:hover {
+    transform: scale(1.03);
+    box-shadow: 0px 10px 25px rgba(0,255,255,0.6);
+}
+.numbers {
+    font-size: 28px;
+    font-weight: bold;
+    color: #0ff;
+    text-align:center;
+}
+.explain {
+    font-size: 12px;
+    color: #ccc;
+    margin-top: 10px;
+}
+.heading {
+    font-size: 20px;
+    color: #0ff;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+def card(ticket, explanation, heading):
+    nums = " - ".join(map(str, ticket))
+    exp_html = "<br>".join(explanation)
+    st.markdown(f"""
+    <div class="card">
+        <div class="heading">{heading}</div>
+        <div class="numbers">{nums}</div>
+        <div class="explain">{exp_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# -------------------------------
+# NAVIGATION
+# -------------------------------
+page = st.sidebar.radio("Menu", ["Dashboard","Add Draw","History","Reset"])
+reload_tickets = st.sidebar.button("🔄 Generate New Ticket Sets")
+
+# -------------------------------
+# ADD DRAW
 # -------------------------------
 if page=="Add Draw":
-    st.header("➕ Add Draw")
-    inp=st.text_input("Enter 12 numbers (comma separated)")
-    if st.button("💾 Save Draw"):
+    inp = st.text_input("Enter 12 numbers (comma separated)")
+    if st.button("Save"):
         try:
-            nums=list(map(int,inp.split(",")))
-            if len(nums)==12: save_draw(nums); st.success("✅ Draw saved!")
-            else: st.error("❌ Enter exactly 12 numbers")
-        except: st.error("❌ Invalid input")
+            nums = list(map(int, inp.split(",")))
+            if len(nums) == 12:
+                save_draw(nums)
+                rl_model = update_rl(load_rl(), nums)
+                save_rl(rl_model)
+                st.success("✅ Draw Saved")
+            else:
+                st.error("❌ Enter exactly 12 numbers")
+        except:
+            st.error("❌ Invalid input")
 
 # -------------------------------
-# RESET DATABASE PAGE
+# DASHBOARD
 # -------------------------------
-elif page=="Reset Database":
-    st.header("⚠️ Reset Database")
-    if st.button("🗑 Clear All Data"):
-        reset_data(); st.warning("Database cleared!")
+elif page=="Dashboard":
+    data = load_draws()
+    if not data:
+        st.warning("Add draws first")
+        st.stop()
+
+    draws, freq, freq_p, rec, rec_p, trans_p = build_model(data)
+    base = final_probs(draws, freq_p, rec_p, trans_p)
+    rl_model = load_rl()
+    rl = rl_probs(rl_model)
+    final = combine(base, rl)
+
+    st.subheader("📊 Probability Distribution")
+    df_plot = pd.DataFrame({"Number": list(final.keys()), "Probability": list(final.values())})
+    st.plotly_chart(px.bar(df_plot, x="Number", y="Probability", title="Number Probabilities"))
+
+    # -------------------------------
+    # FOUR SECTIONS
+    # -------------------------------
+    for section in range(1,5):
+        st.markdown(f"### 🔹 Section {section} - Suggested Tickets")
+        for balls in range(1,9):
+            t = gen_ticket(final, balls)
+            heading = f"{balls} Ball Selection"
+            explanation = explain_ticket(t, freq, rec, trans_p, rl_model, draws[-1])
+            card(t, explanation, heading)
 
 # -------------------------------
-# HISTORY PAGE
+# HISTORY
 # -------------------------------
 elif page=="History":
-    draws=load_draws()
-    if draws:
-        st.header("📜 Draw History")
-        st.dataframe(pd.DataFrame(draws,columns=[f"Draw {i+1}" for i in range(len(draws[0]))]),use_container_width=True)
-    else: st.warning("No data available")
+    data = load_draws()
+    if data:
+        st.subheader("📜 Draw History Table")
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.warning("No draw history")
 
 # -------------------------------
-# DASHBOARD PAGE
+# RESET
 # -------------------------------
-else:
-    draws=load_draws()
-    if not draws: st.warning("No data yet. Add draws first."); st.stop()
-    st.header("📊 Lottery AI PRO Dashboard")
-
-    # ANALYSIS
-    df, most, least=analyze(draws)
-    model=train_model(draws)
-    df["AI_norm"]=0
-    if model:
-        ai=ai_scores(draws,model)
-        df["AI"]=df["Number"].map(ai)
-        df["AI_norm"]=df["AI"]/max(df["AI"].max(),1)
-    df["Hybrid"]=(df["Freq_norm"]*0.5)+(df["AI_norm"]*0.5)
-    df=calculate_probabilities(df)
-
-    # BET SIMULATION SLIDER
-    st.subheader("🎯 Bet Simulator")
-    ball_count=st.slider("Select Number of Balls",1,8,3)
-    payout_dict={1:1.4,2:3,3:8,4:17,5:41,6:111,7:351,8:1201}
-    ticket=generate_ticket(df,ball_count)
-    prob=ticket_probability(ticket,df)
-    ev=expected_value(prob,payout_dict[ball_count])
-    risk=ticket_risk(ticket,df)
-    st.markdown(f"**🎟 Ticket:** {ticket}  |  **💰 Payout:** {payout_dict[ball_count]}x  |  **📊 Probability:** {prob:.6f}  |  **📈 EV:** {ev:.6f}  | ⚠️ Risk: {risk:.5f}")
-
-    # TOP PREDICTED NUMBERS PANEL
-    st.subheader("🔥 AI Predicted Numbers")
-    top_numbers=df.sort_values("AI_norm",ascending=False).head(5)
-    st.metric("Top Predicted Number",top_numbers.iloc[0]["Number"])
-    st.write(top_numbers[["Number","AI_norm"]].reset_index(drop=True))
-
-    # INTERACTIVE CHARTS
-    st.subheader("📈 Analytics Charts")
-    col1,col2=st.columns(2)
-    with col1:
-        fig_freq=px.bar(df,x="Number",y="Frequency",color="Frequency",color_continuous_scale="Viridis",
-                        title="Number Frequency",labels={"Frequency":"Frequency"})
-        st.plotly_chart(fig_freq,use_container_width=True)
-    with col2:
-        fig_hybrid=px.bar(df,x="Number",y="Hybrid",color="Hybrid",color_continuous_scale="Plasma",
-                          title="Hybrid Score per Number",labels={"Hybrid":"Hybrid Score"})
-        st.plotly_chart(fig_hybrid,use_container_width=True)
-
-    # BET CARDS INTERACTIVE
-    st.subheader("🎯 Smart Bet Recommendations")
-    bet_data=[("1 Ball",1.4,1),("2 Balls",3,2),("3 Balls",8,3),("4 Balls",17,4),
-              ("5 Balls",41,5),("6 Balls",111,6),("7 Balls",351,7),("8 Balls",1201,8)]
-    results=[]
-    for label,payout,count in bet_data:
-        ticket=generate_ticket(df,count)
-        prob=ticket_probability(ticket,df)
-        ev=expected_value(prob,payout)
-        risk=ticket_risk(ticket,df)
-        results.append({"Bet Type":label,"Numbers":ticket,"Payout":payout,
-                        "Probability":prob,"EV":ev,"Risk":risk})
-    bet_df=pd.DataFrame(results)
-    bet_df["Safety Rank"]=bet_df["Risk"].rank(method="min")
-    bet_df=bet_df.sort_values("Risk")
-    best_idx=bet_df["EV"].idxmax(); min_risk=bet_df["Risk"].min(); max_risk=bet_df["Risk"].max()
-
-    cols=st.columns(3)
-    for idx,row in bet_df.iterrows():
-        is_best=row.name==best_idx
-        col_idx=idx%3
-        with cols[col_idx]:
-            color=card_color(is_best,row["Risk"],min_risk,max_risk)
-            st.markdown(f"""
-            <div style="
-                background:{color};
-                border-radius:20px;
-                padding:20px;
-                margin-bottom:15px;
-                color:white;
-                transition: transform 0.2s;
-            ">
-                <h3 style="text-align:center">{row['Bet Type']} {"🟢 BEST BET" if is_best else ""}</h3>
-                <p><strong>🎟 Numbers:</strong> {row['Numbers']}</p>
-                <p><strong>💰 Payout:</strong> {row['Payout']}x</p>
-                <p><strong>📊 Probability:</strong> {row['Probability']:.6f}</p>
-                <p><strong>📈 EV:</strong> {row['EV']:.6f}</p>
-                <p><strong>⚠️ Risk Score:</strong> {row['Risk']:.5f}</p>
-            </div>
-            """,unsafe_allow_html=True)
-
-    # FULL TABLE
-    st.subheader("📋 Full Analysis Table")
-    st.dataframe(df.sort_values("Hybrid",ascending=False),use_container_width=True)
+elif page=="Reset":
+    if st.button("Reset All"):
+        if os.path.exists(DRAW_FILE): os.remove(DRAW_FILE)
+        if os.path.exists(RL_FILE): os.remove(RL_FILE)
+        st.warning("All data reset complete")

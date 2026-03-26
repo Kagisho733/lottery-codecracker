@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "morning-texas",
+  "private_key_id": "bc88d6cd77fa5dd58098cfc911bf1f543f2f21ec",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDtqN+w5QjWcuD0\nBTvnuwThW0WhK8IVO+GuXj/Z+vvyhJt+DM1Sq1oEZKYC7aJ7h/Nn3C/TVFr+Yvm+\naD1dsWGp5o8MEqjegHtiILapKC0fNl+HnABCdNuJLG8C+Q3r/Ng+4HuMHFcC/Do+\n6shJzx+umE62OUSxXYKoGHxmPv2DoTfjewX2FF4xsFOPOzRQZzOPXBTf/xRmnPbq\nXM8LbGcK/YekVSy0AsNoTLoaNCIcFEreQY09VpFvftMS7vAS2PTaaSmIt8u3oLkf\nVr+w25KHJtv/s3RDOdB5177s0oBGSUvM0w+grp9ap/52W0EogpWkoFEiLaKddQo/\nA5Dm3p2BAgMBAAECggEACBvkmwRrkWaczJKvpTPdQiOzO+Eyd3dCN2j9mH5O8arK\n4+mDqXQRh5gYDn5Fdp3QRS1O//DPRIIDx7aGjn92h72nSJgL5UCgxRu848dsR7X7\nGzVMUHgsg/ENTh6JljFbvwR5jrGqWd6ZjatE33jW2cYWXHMWiA863amtN+9jBsZM\n+lpnqxRdIfwC4hQj5YxCAlUBjbXG4q+GELREae6poIzHtcTNHhrPoXdcA1FoBLtT\njl2UKIvvWP0beY2sm+YRw54YgdDioGognr90l7xAQOHztR4Gdb7h9oTgf2bWpYv5\n+JD/P4Gg8E+eyN0UCgJfFLNm/Ixr8Q64Wjpvj3GJ4QKBgQD/VwF1UcXi3mHFcTso\nkMmvhlqbOzZwifmuChol4WFgTAeWLowKRYY35QpswE7VHOCJa2s6wzFbaP3Y8MEm\nafXrgxdqVD+NVWeXg4jsTqx1tzS7m0XF6Rlhcjo+RtLDwve7FHl074ooP2FkiMjp\n/s8n3HJOku3QL8yIFegGUn3SUQKBgQDuRiqnlVHgrNwO1F7BYlJsFV5HALgku2Ba\nwJif5ZZcUAIIzyc9JUvvGJ5VzXnvCGhBpf75uTrCqcNIG2+VPxVcsUbT+sSVEiCD\naAUjvlyBszrT5RiKC0PxVnv4n8dDAGgaLnySWTunjeytelwDx7Lf7aV+y10hhlNF\ncnkVnqCcMQKBgDOtmE32Tuaru34KfL6pDyjHOG9SfKIqSq4+vSwNgXfL630pzo4F\npDSL1qBMC6h2P7uQUhOCjerCRR4zG+R6bZtM3OBYTMR+FIlFxeCNy7nHapTNyEFV\n/B0M0VzpWJ7mRt1GN47DLGMY8M04IfG58JNQupHMivUnt22TgXJGH9EBAoGAT0I3\n3hblbX8SlDxAaMNz91AEVEoA9vb9TjLSkh2kroBOrO97dfN6FsZxpMj8zm5Vf8Df\n1+GtkiM2Oj4mF9csG/E8RjccPRoShqOLUiB4VQxxfRqv1vt4VkcWZdWASuFPv6XG\n+keEeG/VUr9o7Dj5X1OFwW+UQxqTiH5TmMVzV4ECgYBIhZQEzWsBIWg2IcBJJAIB\nSa95pbvuCLXoO7ISDqVrZc4SrqFZNLsIIZgkK5wFB8ID5tfKlPu8roZlvx1rCd14\nyCZIFLP3Gw0ZsJ27cyiLN2gG7iYjA4kNJmAQkC1QPf9zWTecnmS7iUaLsXaF3Eg1\nuLp7Wg3PFbU/0Bw+0zQhDw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@morning-texas.iam.gserviceaccount.com",
+  "client_id": "108474565532070142245",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40morning-texas.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
