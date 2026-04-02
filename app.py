@@ -1,259 +1,497 @@
-# ===============================
-# LOTTERY AI PRO – FOUR SECTION SAAS (1 Set per Ball Count)
-# ===============================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, json
+import os
+import json
 from datetime import datetime
 from collections import Counter
 import plotly.express as px
+import plotly.graph_objects as go
+import networkx as nx
 
-st.set_page_config(page_title="🎰 Lottery AI PRO - 4 Sections", layout="wide")
+st.set_page_config(page_title="Lottery AI PRO v8 SaaS", layout="wide")
 
+# local asset path (just replace filename inside assets folder when needed)
+BG_PATH = "assets/bg.jpg"
+
+# =========================
+# FILES & CONSTANTS
+# =========================
 DRAW_FILE = "draws.json"
 RL_FILE = "rl_model.json"
+FIN_FILE = "finance.json"
+TREND_FILE = "trend.json"
+PAIR_FILE = "pairs.json"
+COMMENTARY_FILE = "commentary.json"
 NUMBERS = list(range(1, 25))
 
-# -------------------------------
-# STORAGE FUNCTIONS
-# -------------------------------
-def save_draw(draw):
-    data = []
-    if os.path.exists(DRAW_FILE):
-        data = json.load(open(DRAW_FILE))
-    data.append({"numbers": draw, "date": str(datetime.now())})
-    json.dump(data, open(DRAW_FILE, "w"))
+
+# =========================
+# STORAGE
+# =========================
+def load_json(file, default):
+    if not os.path.exists(file):
+        return default
+    try:
+        with open(file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def save_json(file, data):
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 def load_draws():
-    if not os.path.exists(DRAW_FILE):
-        return []
-    return json.load(open(DRAW_FILE))
+    return load_json(DRAW_FILE, [])
 
-# -------------------------------
-# REINFORCEMENT LEARNING MODEL
-# -------------------------------
-def init_rl():
-    return {str(n): {"a":1,"b":1} for n in NUMBERS}
+
+def load_finance():
+    return load_json(FIN_FILE, [])
+
+
+def load_pairs():
+    return load_json(PAIR_FILE, {})
+
+
+def load_trend():
+    return load_json(TREND_FILE, [])
+
+
+@st.cache_data(show_spinner=False)
+def load_commentary():
+    return load_json(COMMENTARY_FILE, [])
+
 
 def load_rl():
-    if not os.path.exists(RL_FILE):
-        return init_rl()
-    data = json.load(open(RL_FILE))
-    return {str(k):v for k,v in data.items()}
+    return load_json(RL_FILE, {str(n): {"a": 1, "b": 1} for n in NUMBERS})
 
-def save_rl(m):
-    json.dump(m, open(RL_FILE,"w"))
 
-def update_rl(m, draw):
-    s = set(draw)
-    for k in m:
-        n = int(k)
-        if n in s:
-            m[k]["a"] += 2
+def save_draw(draw, comment=""):
+    data = load_draws()
+    entry = {"numbers": draw, "date": str(datetime.now()), "comment": comment}
+    data.append(entry)
+    save_json(DRAW_FILE, data)
+
+    trend = load_trend()
+    trend.append({"date": entry["date"], "numbers": draw})
+    save_json(TREND_FILE, trend)
+
+    pairs = load_pairs()
+    for i in range(len(draw)):
+        for j in range(i + 1, len(draw)):
+            a, b = sorted([draw[i], draw[j]])
+            key = f"{a}-{b}"
+            pairs[key] = pairs.get(key, 0) + 1
+    save_json(PAIR_FILE, pairs)
+
+
+def save_finance(entry):
+    data = load_finance()
+    data.append(entry)
+    save_json(FIN_FILE, data)
+
+
+# =========================
+# RL + ANALYTICS
+# =========================
+def update_rl(model, draw):
+    for k in model:
+        if int(k) in draw:
+            model[k]["a"] += 2
         else:
-            m[k]["b"] += 1
-    return m
+            model[k]["b"] += 1
+    return model
 
-def rl_probs(m):
-    p = {int(n): np.random.beta(v["a"],v["b"]) for n,v in m.items()}
-    t = sum(p.values())
-    return {n:v/t for n,v in p.items()}
 
-# -------------------------------
-# PROBABILITY ENGINE
-# -------------------------------
-def build_model(draws):
-    only_draws = [d["numbers"] for d in draws]
+def rl_probs(model):
+    probs = {int(k): np.random.beta(v["a"], v["b"]) for k, v in model.items()}
+    total = sum(probs.values()) or 1
+    return {k: v / total for k, v in probs.items()}
 
-    freq = Counter(n for d in only_draws for n in d)
-    total = len(only_draws)*12
-    freq_p = {n:freq[n]/total for n in NUMBERS}
 
-    rec = {n:0 for n in NUMBERS}
-    for i,d in enumerate(reversed(only_draws)):
-        w = 0.9**i
-        for n in d: rec[n] += w
-    rec_p = {n: rec[n]/sum(rec.values()) for n in NUMBERS}
+@st.cache_data(show_spinner=False)
+def build_model(draw_data):
+    draws = [x["numbers"] for x in draw_data]
+    freq = Counter(n for row in draws for n in row)
 
-    trans = {n:Counter() for n in NUMBERS}
-    for i in range(1,len(only_draws)):
-        for p in only_draws[i-1]:
-            for c in only_draws[i]:
-                trans[p][c] += 1
+    rec = {n: 0 for n in NUMBERS}
+    for i, row in enumerate(reversed(draws)):
+        w = 0.9 ** i
+        for n in row:
+            rec[n] += w
+
+    total = max(len(draws) * 12, 1)
+    freq_p = {n: freq[n] / total for n in NUMBERS}
+    rec_sum = sum(rec.values()) or 1
+    rec_p = {n: rec[n] / rec_sum for n in NUMBERS}
+
+    trans = {n: Counter() for n in NUMBERS}
+    for i in range(1, len(draws)):
+        for prev in draws[i - 1]:
+            for curr in draws[i]:
+                trans[prev][curr] += 1
 
     trans_p = {}
     for n in NUMBERS:
         t = sum(trans[n].values()) or 1
-        trans_p[n] = {k:v/t for k,v in trans[n].items()}
+        trans_p[n] = {k: v / t for k, v in trans[n].items()}
 
-    return only_draws, freq, freq_p, rec, rec_p, trans_p
+    return draws, freq, freq_p, rec, rec_p, trans_p
 
-def final_probs(draws,freq_p,rec_p,trans_p):
-    last = draws[-1] if draws else []
-    scores = {}
-    for n in NUMBERS:
-        base = 0.4*freq_p[n] + 0.3*rec_p[n]
-        t = np.mean([trans_p.get(p,{}).get(n,0) for p in last]) if last else 0
-        scores[n] = 0.7*base + 0.3*t
-    total = sum(scores.values())
-    return {n: v/total for n,v in scores.items()}
 
-def combine(base,rl):
-    c = {n:0.6*base[n] + 0.4*rl[n] for n in NUMBERS}
-    t = sum(c.values())
-    return {n:v/t for n,v in c.items()}
+def optimize_best_picks(final_probs, min_size=4, max_size=8):
+    ranked = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
+    optimized = {}
+    for size in range(min_size, max_size + 1):
+        optimized[size] = sorted([n for n, _ in ranked[:size]])
+    return optimized
 
-# -------------------------------
-# TICKET GENERATOR
-# -------------------------------
-def gen_ticket(p,c):
-    nums = list(p.keys())
-    w = np.array([p[n] for n in nums])
-    w /= w.sum()
-    return sorted(np.random.choice(nums,c,False,p=w))
 
-# -------------------------------
-# TICKET EXPLANATION
-# -------------------------------
-def explain_ticket(ticket, freq, rec, trans_p, rl_model, last_draw):
-    explanation = []
-    for n in ticket:
-        reasons = []
-        if freq[n] > np.mean(list(freq.values())):
-            reasons.append("hot")
-        if rec[n] > np.mean(list(rec.values())):
-            reasons.append("recent")
-        if last_draw:
-            trans_score = np.mean([trans_p.get(p, {}).get(n,0) for p in last_draw])
-            if trans_score > 0.05:
-                reasons.append("follows pattern")
-        if rl_model.get(str(n), {"a":1,"b":1})["a"] > rl_model.get(str(n), {"a":1,"b":1})["b"]:
-            reasons.append("AI learned")
-        if reasons:
-            explanation.append(f"{n}: {', '.join(reasons)}")
-    return explanation
+def generate_updates(freq, rec):
+    msgs = []
+    avg_freq = np.mean(list(freq.values())) if freq else 0
+    avg_rec = np.mean(list(rec.values())) if rec else 0
+    hot = [n for n in NUMBERS if freq[n] > avg_freq][:6]
+    rising = [n for n in NUMBERS if rec[n] > avg_rec][:6]
+    if hot:
+        msgs.append(f"🔥 Hot numbers picking up: {hot}")
+    if rising:
+        msgs.append(f"📈 Rising trend numbers: {rising}")
+    overlap = list(set(hot).intersection(set(rising)))
+    if overlap:
+        msgs.append(f"🚀 Strong signals forming: {overlap[:6]}")
+    return msgs
 
-# -------------------------------
-# UI STYLE
-# -------------------------------
-st.markdown("""
+
+@st.cache_data(show_spinner=False)
+def plot_heatmap(draws):
+    if not draws:
+        return None
+    fig = px.imshow(
+        pd.DataFrame(draws),
+        aspect="auto",
+        color_continuous_scale="Turbo",
+        template="plotly_dark",
+    )
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=40, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=420,
+    )
+    return fig
+
+
+@st.cache_data(show_spinner=False)
+def plot_pair_network(pairs, top_n=15):
+    if not pairs:
+        return None
+
+    items = sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    G = nx.Graph()
+
+    for key, value in items:
+        a, b = map(int, key.split("-"))
+        G.add_edge(a, b, weight=value)
+
+    pos = nx.spring_layout(G, seed=42, iterations=20)
+
+    edge_x, edge_y = [], []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x += [x0, x1, None]
+        edge_y += [y0, y1, None]
+
+    node_x, node_y, labels = [], [], []
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        labels.append(str(node))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines", line=dict(width=1)))
+    fig.add_trace(
+        go.Scatter(
+            x=node_x,
+            y=node_y,
+            mode="markers+text",
+            text=labels,
+            textposition="top center",
+            marker=dict(size=20),
+        )
+    )
+    fig.update_layout(
+        showlegend=False,
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        margin=dict(l=10, r=10, t=40, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=600,
+    )
+    return fig
+
+
+# =========================
+# UX/UI STYLE
+# =========================
+st.markdown(f"""
 <style>
-.card {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    border-radius: 18px;
-    padding: 20px;
-    margin-bottom: 15px;
+.stApp {{
+    background:
+        linear-gradient(rgba(10,10,35,0.82), rgba(10,10,35,0.92)),
+        url(BG_PATH = assets/bgjpg.avif);
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
     color: white;
-    box-shadow: 0px 6px 15px rgba(0,0,0,0.3);
-    transition: transform 0.2s, box-shadow 0.3s;
-}
-.card:hover {
-    transform: scale(1.03);
-    box-shadow: 0px 10px 25px rgba(0,255,255,0.6);
-}
-.numbers {
-    font-size: 28px;
-    font-weight: bold;
-    color: #0ff;
+}}
+.block-container {{max-width: 1600px; padding-top: 1rem;}}
+[data-testid="stSidebar"] {{
+    background:
+        linear-gradient(rgba(15,23,42,0.88), rgba(30,41,59,0.92)),
+        url('{BG_PATH}');
+    background-size: cover;
+    background-position: center;
+}}
+.ticket-card {{
+    background: rgba(15,23,42,0.88);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-top: 4px solid #f59e0b;
+    border-radius: 22px;
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 10px 35px rgba(0,0,0,0.25);
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}}
+.number-grid {{
+    display:grid;
+    grid-template-columns: repeat(4,1fr);
+    gap:10px;
+    margin-top:14px;
+}}
+.ball {{
+    background: linear-gradient(135deg,#f59e0b,#ef4444);
+    color:white;
     text-align:center;
-}
-.explain {
-    font-size: 12px;
-    color: #ccc;
-    margin-top: 10px;
-}
-.heading {
-    font-size: 20px;
-    color: #0ff;
-    font-weight: bold;
+    padding:10px;
+    border-radius:999px;
+    font-weight:800;
+}}
+.commentary-box {{
+    background: rgba(30,41,59,0.75);
+    border-left: 4px solid #22c55e;
+    border-radius: 14px;
+    padding: 12px;
     margin-bottom: 10px;
-}
+}}
 </style>
 """, unsafe_allow_html=True)
 
-def card(ticket, explanation, heading):
-    nums = " - ".join(map(str, ticket))
-    exp_html = "<br>".join(explanation)
-    st.markdown(f"""
-    <div class="card">
-        <div class="heading">{heading}</div>
-        <div class="numbers">{nums}</div>
-        <div class="explain">{exp_html}</div>
+if "advanced_graphs" not in st.session_state:
+    st.session_state.advanced_graphs = False
+
+page = st.sidebar.radio("Navigation", ["Dashboard", "Add Draw", "History", "Finance", "Reset"])
+st.sidebar.toggle("Advanced Graphs", key="advanced_graphs")
+
+
+# =========================
+# ADD DRAW
+# =========================
+if page == "Add Draw":
+    st.subheader("➕ Add Draw")
+    with st.form("draw_form"):
+        inp = st.text_input("Enter 12 numbers comma separated")
+        comment = st.text_input("Commentary")
+        submitted = st.form_submit_button("Save Draw")
+
+    if submitted:
+        try:
+            nums = [int(x.strip()) for x in inp.split(",") if x.strip()]
+            if len(nums) != 12 or len(set(nums)) != 12:
+                st.error("Enter exactly 12 unique numbers")
+            else:
+                save_draw(nums, comment)
+                rl = update_rl(load_rl(), nums)
+                save_json(RL_FILE, rl)
+
+                draws, freq, _, rec, _, _ = build_model(load_draws())
+                updates = generate_updates(freq, rec)
+                existing = load_commentary()
+                existing.insert(0, {"date": str(datetime.now()), "messages": updates})
+                save_json(COMMENTARY_FILE, existing[:20])
+                st.cache_data.clear()
+
+                st.success("Draw saved + analysis updated")
+                for msg in updates:
+                    st.info(msg)
+        except Exception:
+            st.error("Invalid input")
+
+
+# =========================
+# DASHBOARD
+# =========================
+elif page == "Dashboard":
+    st.title("🎰 Lottery AI PRO Dashboard")
+    st.markdown("""
+    <div class='ticket-card'>
+        <h3>🎉 Welcome back</h3>
+        <p>Your smart lottery SaaS workspace is live with predictive analytics, finance, and ticket intelligence.</p>
     </div>
     """, unsafe_allow_html=True)
 
-# -------------------------------
-# NAVIGATION
-# -------------------------------
-page = st.sidebar.radio("Menu", ["Dashboard","Add Draw","History","Reset"])
-reload_tickets = st.sidebar.button("🔄 Generate New Ticket Sets")
-
-# -------------------------------
-# ADD DRAW
-# -------------------------------
-if page=="Add Draw":
-    inp = st.text_input("Enter 12 numbers (comma separated)")
-    if st.button("Save"):
-        try:
-            nums = list(map(int, inp.split(",")))
-            if len(nums) == 12:
-                save_draw(nums)
-                rl_model = update_rl(load_rl(), nums)
-                save_rl(rl_model)
-                st.success("✅ Draw Saved")
-            else:
-                st.error("❌ Enter exactly 12 numbers")
-        except:
-            st.error("❌ Invalid input")
-
-# -------------------------------
-# DASHBOARD
-# -------------------------------
-elif page=="Dashboard":
     data = load_draws()
     if not data:
         st.warning("Add draws first")
         st.stop()
 
     draws, freq, freq_p, rec, rec_p, trans_p = build_model(data)
-    base = final_probs(draws, freq_p, rec_p, trans_p)
-    rl_model = load_rl()
-    rl = rl_probs(rl_model)
-    final = combine(base, rl)
+    rl = rl_probs(load_rl())
+    final = {n: ((0.6 * freq_p[n] + 0.4 * rec_p[n]) * 0.6) + rl[n] * 0.4 for n in NUMBERS}
 
-    st.subheader("📊 Probability Distribution")
-    df_plot = pd.DataFrame({"Number": list(final.keys()), "Probability": list(final.values())})
-    st.plotly_chart(px.bar(df_plot, x="Number", y="Probability", title="Number Probabilities"))
+    fin = pd.DataFrame(load_finance())
+    c1, c2, c3 = st.columns(3)
+    spent = fin["stake"].sum() if not fin.empty else 0
+    profit = fin["profit"].sum() if not fin.empty else 0
+    roi = (profit / spent * 100) if spent else 0
+    c1.metric("Total Expense", f"{spent:.2f}")
+    c2.metric("Profit", f"{profit:.2f}")
+    c3.metric("ROI", f"{roi:.2f}%")
 
-    # -------------------------------
-    # FOUR SECTIONS
-    # -------------------------------
-    for section in range(1,5):
-        st.markdown(f"### 🔹 Section {section} - Suggested Tickets")
-        for balls in range(1,9):
-            t = gen_ticket(final, balls)
-            heading = f"{balls} Ball Selection"
-            explanation = explain_ticket(t, freq, rec, trans_p, rl_model, draws[-1])
-            card(t, explanation, heading)
+    row1, row2 = st.columns([2, 1])
+    with row1:
+        prob_df = pd.DataFrame({"Number": list(final.keys()), "Prob": list(final.values())})
+        fig_prob = px.bar(prob_df, x="Number", y="Prob", title="🎯 Probability Strength", template="plotly_dark")
+        fig_prob.update_layout(height=420, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_prob, use_container_width=True)
 
-# -------------------------------
+    with row2:
+        freq_df = pd.DataFrame({"Number": list(freq.keys()), "Frequency": list(freq.values())})
+        fig_freq = px.bar(freq_df, x="Number", y="Frequency", title="📈 Frequency", template="plotly_dark")
+        fig_freq.update_layout(height=420, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_freq, use_container_width=True)
+
+    heatmap = plot_heatmap(draws)
+    if heatmap:
+        st.plotly_chart(heatmap, use_container_width=True)
+
+    st.subheader("📝 Live Update Commentary")
+    for item in load_commentary()[:5]:
+        st.markdown(f"<div class='commentary-box'><b>{item['date']}</b></div>", unsafe_allow_html=True)
+        for m in item["messages"]:
+            st.markdown(f"<div class='commentary-box'>{m}</div>", unsafe_allow_html=True)
+
+    st.subheader("🎯 Best 4–8 Picks Optimizer")
+    optimized_sets = optimize_best_picks(final)
+
+    tabs = st.tabs(["4 Picks", "5 Picks", "6 Picks", "7 Picks", "8 Picks"])
+    for idx, size in enumerate(range(4, 9)):
+        with tabs[idx]:
+            ticket = optimized_sets[size]
+            grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
+            st.markdown(
+                f"""
+                <div class='ticket-card'>
+                    <h4>🎟️ Optimized {size}-Number Ticket</h4>
+                    <p>Best statistically ranked combination based on frequency, recency, and RL confidence.</p>
+                    <div class='number-grid'>{grid}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.subheader("🎯 Smart Ticket Sections")
+    for sec in range(1, 5):
+        st.markdown(f"### Section {sec}")
+        cols = st.columns(4)
+        for i, balls in enumerate(range(1, 9)):
+            with cols[i % 4]:
+                weights = np.array(list(final.values()))
+                weights /= weights.sum()
+                ticket = sorted(np.random.choice(NUMBERS, balls, replace=False, p=weights))
+                grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
+                st.markdown(
+                    f"<div class='ticket-card'><b>{balls} Ball</b><div class='number-grid'>{grid}</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+    st.subheader("📚 Recent History")
+    hist = pd.DataFrame(data[-100:])
+    hist.insert(0, "No", range(1, len(hist) + 1))
+    st.dataframe(hist.tail(10), use_container_width=True)
+
+    if st.session_state.advanced_graphs:
+        st.subheader("🕸️ Advanced Pair Graph")
+        fig = plot_pair_network(load_pairs())
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+
+
+# =========================
 # HISTORY
-# -------------------------------
-elif page=="History":
-    data = load_draws()
-    if data:
-        st.subheader("📜 Draw History Table")
-        df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.warning("No draw history")
+# =========================
+elif page == "History":
+    df = pd.DataFrame(load_draws())
+    if not df.empty:
+        df.insert(0, "No", range(1, len(df) + 1))
+        st.subheader("📚 History Manager")
+        edited = st.data_editor(df, use_container_width=True, num_rows="dynamic")
 
-# -------------------------------
+        if st.button("Remove Duplicate Rows"):
+            cleaned = edited.drop_duplicates(subset=["numbers", "date"]).reset_index(drop=True)
+            cleaned = cleaned.drop(columns=["No"], errors="ignore")
+            save_json(DRAW_FILE, cleaned.to_dict("records"))
+            st.success("Duplicates removed")
+
+        if st.button("Save History"):
+            cleaned = edited.drop(columns=["No"], errors="ignore")
+            save_json(DRAW_FILE, cleaned.to_dict("records"))
+            st.success("History saved")
+
+
+# =========================
+# FINANCE
+# =========================
+elif page == "Finance":
+    st.subheader("💰 Finance")
+    with st.form("fin_form"):
+        stake = st.number_input("Stake", min_value=0.0)
+        payout = st.number_input("Payout", min_value=0.0)
+        submitted = st.form_submit_button("Add Entry")
+
+    if submitted:
+        save_finance({
+            "date": str(datetime.now()),
+            "stake": stake,
+            "payout": payout,
+            "profit": payout - stake,
+        })
+        st.success("Finance saved")
+
+    fin = pd.DataFrame(load_finance())
+    if not fin.empty:
+        st.data_editor(fin, use_container_width=True)
+        if st.button("Reset Finance"):
+            save_json(FIN_FILE, [])
+            st.success("Finance reset complete")
+
+
+# =========================
 # RESET
-# -------------------------------
-elif page=="Reset":
-    if st.button("Reset All"):
-        if os.path.exists(DRAW_FILE): os.remove(DRAW_FILE)
-        if os.path.exists(RL_FILE): os.remove(RL_FILE)
-        st.warning("All data reset complete")
+# =========================
+elif page == "Reset":
+    if st.button("Reset All System Data"):
+        for f in [DRAW_FILE, RL_FILE, FIN_FILE, TREND_FILE, PAIR_FILE, COMMENTARY_FILE]:
+            if os.path.exists(f):
+                os.remove(f)
+        st.cache_data.clear()
+        st.success("Full system reset complete")
