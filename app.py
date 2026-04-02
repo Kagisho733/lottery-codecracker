@@ -11,9 +11,6 @@ import networkx as nx
 
 st.set_page_config(page_title="Lottery AI PRO v8 SaaS", layout="wide")
 
-# local asset path (just replace filename inside assets folder when needed)
-BG_PATH = "assets/bg.jpg"
-
 # =========================
 # FILES & CONSTANTS
 # =========================
@@ -25,9 +22,8 @@ PAIR_FILE = "pairs.json"
 COMMENTARY_FILE = "commentary.json"
 NUMBERS = list(range(1, 25))
 
-
 # =========================
-# STORAGE
+# STORAGE FUNCTIONS
 # =========================
 def load_json(file, default):
     if not os.path.exists(file):
@@ -38,36 +34,28 @@ def load_json(file, default):
     except Exception:
         return default
 
-
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-
 def load_draws():
     return load_json(DRAW_FILE, [])
-
 
 def load_finance():
     return load_json(FIN_FILE, [])
 
-
 def load_pairs():
     return load_json(PAIR_FILE, {})
 
-
 def load_trend():
     return load_json(TREND_FILE, [])
-
 
 @st.cache_data(show_spinner=False)
 def load_commentary():
     return load_json(COMMENTARY_FILE, [])
 
-
 def load_rl():
     return load_json(RL_FILE, {str(n): {"a": 1, "b": 1} for n in NUMBERS})
-
 
 def save_draw(draw, comment=""):
     data = load_draws()
@@ -87,12 +75,10 @@ def save_draw(draw, comment=""):
             pairs[key] = pairs.get(key, 0) + 1
     save_json(PAIR_FILE, pairs)
 
-
 def save_finance(entry):
     data = load_finance()
     data.append(entry)
     save_json(FIN_FILE, data)
-
 
 # =========================
 # RL + ANALYTICS
@@ -105,12 +91,10 @@ def update_rl(model, draw):
             model[k]["b"] += 1
     return model
 
-
 def rl_probs(model):
     probs = {int(k): np.random.beta(v["a"], v["b"]) for k, v in model.items()}
     total = sum(probs.values()) or 1
     return {k: v / total for k, v in probs.items()}
-
 
 @st.cache_data(show_spinner=False)
 def build_model(draw_data):
@@ -141,14 +125,12 @@ def build_model(draw_data):
 
     return draws, freq, freq_p, rec, rec_p, trans_p
 
-
 def optimize_best_picks(final_probs, min_size=4, max_size=8):
     ranked = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
     optimized = {}
     for size in range(min_size, max_size + 1):
         optimized[size] = sorted([n for n, _ in ranked[:size]])
     return optimized
-
 
 def generate_updates(freq, rec):
     msgs = []
@@ -164,7 +146,6 @@ def generate_updates(freq, rec):
     if overlap:
         msgs.append(f"🚀 Strong signals forming: {overlap[:6]}")
     return msgs
-
 
 @st.cache_data(show_spinner=False)
 def plot_heatmap(draws):
@@ -183,7 +164,6 @@ def plot_heatmap(draws):
         height=420,
     )
     return fig
-
 
 @st.cache_data(show_spinner=False)
 def plot_pair_network(pairs, top_n=15):
@@ -236,72 +216,110 @@ def plot_pair_network(pairs, top_n=15):
     )
     return fig
 
-
 # =========================
-# UX/UI STYLE
+# LOTTERY THEME CSS
 # =========================
 st.markdown(f"""
 <style>
+/* Main app background: dark space + lottery sparkles */
 .stApp {{
     background:
-        linear-gradient(rgba(10,10,35,0.82), rgba(10,10,35,0.92)),
-        url(BG_PATH = assets/bgjpg.avif);
+        radial-gradient(circle at 20% 20%, rgba(255,215,0,0.2), rgba(0,0,20,0.95) 70%),
+        url('https://images.unsplash.com/photo-1614761356785-c7f3fda25c62?auto=format&fit=crop&w=1600&q=80');
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
     color: white;
+    font-family: 'Segoe UI', sans-serif;
 }}
-.block-container {{max-width: 1600px; padding-top: 1rem;}}
+
+/* Container padding */
+.block-container {{
+    max-width: 1600px;
+    padding-top: 1rem;
+}}
+
+/* Sidebar with lottery theme */
 [data-testid="stSidebar"] {{
     background:
-        linear-gradient(rgba(15,23,42,0.88), rgba(30,41,59,0.92)),
-        url('{BG_PATH}');
+        linear-gradient(rgba(25,25,112,0.9), rgba(0,0,50,0.95)),
+        url('https://images.unsplash.com/photo-1614761356785-c7f3fda25c62?auto=format&fit=crop&w=800&q=80');
     background-size: cover;
     background-position: center;
+    color: white;
 }}
+
+/* Card styling for lottery tickets */
 .ticket-card {{
-    background: rgba(15,23,42,0.88);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-top: 4px solid #f59e0b;
-    border-radius: 22px;
+    background: rgba(20,30,50,0.85);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-top: 4px solid #fbbf24;
+    border-radius: 20px;
     padding: 18px;
     margin-bottom: 16px;
-    box-shadow: 0 10px 35px rgba(0,0,0,0.25);
+    box-shadow: 0 10px 35px rgba(0,0,0,0.3);
     min-height: 240px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    transition: transform 0.2s ease-in-out;
 }}
+.ticket-card:hover {{
+    transform: scale(1.02);
+}}
+
+/* Number balls grid */
 .number-grid {{
-    display:grid;
-    grid-template-columns: repeat(4,1fr);
-    gap:10px;
-    margin-top:14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+    justify-items: center;
 }}
 .ball {{
-    background: linear-gradient(135deg,#f59e0b,#ef4444);
-    color:white;
-    text-align:center;
-    padding:10px;
-    border-radius:999px;
-    font-weight:800;
+   background: radial-gradient(circle at 30% 30%, #f59e0b, #ef4444);
+    color: white;
+    text-align: center;
+    padding: 12px 0;
+    border-radius: 50%;
+    font-weight: 900;
+    font-size: 16px;
+    min-width: 50px;
+    min-height: 50px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease-in-out;
 }}
+.ball:hover {{
+    transform: scale(1.2);
+    box-shadow: 0 6px 18px rgba(255,200,0,0.6);
+}}
+
+/* Commentary box */
 .commentary-box {{
-    background: rgba(30,41,59,0.75);
+    background: rgba(30,41,59,0.8);
     border-left: 4px solid #22c55e;
     border-radius: 14px;
     padding: 12px;
     margin-bottom: 10px;
+    animation: glow 1.5s infinite alternate;
+}}
+
+/* Glow animation for live updates */
+@keyframes glow {{
+    from {{ box-shadow: 0 0 5px #22c55e; }}
+    to {{ box-shadow: 0 0 20px #22c55e; }}
 }}
 </style>
 """, unsafe_allow_html=True)
 
+# =========================
+# SESSION STATE
+# =========================
 if "advanced_graphs" not in st.session_state:
     st.session_state.advanced_graphs = False
 
 page = st.sidebar.radio("Navigation", ["Dashboard", "Add Draw", "History", "Finance", "Reset"])
 st.sidebar.toggle("Advanced Graphs", key="advanced_graphs")
-
 
 # =========================
 # ADD DRAW
@@ -335,7 +353,6 @@ if page == "Add Draw":
                     st.info(msg)
         except Exception:
             st.error("Invalid input")
-
 
 # =========================
 # DASHBOARD
@@ -435,7 +452,6 @@ elif page == "Dashboard":
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 
-
 # =========================
 # HISTORY
 # =========================
@@ -457,41 +473,41 @@ elif page == "History":
             save_json(DRAW_FILE, cleaned.to_dict("records"))
             st.success("History saved")
 
-
 # =========================
 # FINANCE
 # =========================
 elif page == "Finance":
-    st.subheader("💰 Finance")
-    with st.form("fin_form"):
-        stake = st.number_input("Stake", min_value=0.0)
-        payout = st.number_input("Payout", min_value=0.0)
+    st.subheader("💰 Finance Tracker")
+    with st.form("finance_form"):
+        stake = st.number_input("Stake Amount", min_value=0.0, step=1.0)
+        profit = st.number_input("Profit Amount", step=1.0)
         submitted = st.form_submit_button("Add Entry")
-
     if submitted:
-        save_finance({
-            "date": str(datetime.now()),
-            "stake": stake,
-            "payout": payout,
-            "profit": payout - stake,
-        })
-        st.success("Finance saved")
+        save_finance({"stake": stake, "profit": profit, "date": str(datetime.now())})
+        st.success("Finance entry added")
 
-    fin = pd.DataFrame(load_finance())
-    if not fin.empty:
-        st.data_editor(fin, use_container_width=True)
-        if st.button("Reset Finance"):
-            save_json(FIN_FILE, [])
-            st.success("Finance reset complete")
-
+    df = pd.DataFrame(load_finance())
+    if not df.empty:
+        st.dataframe(df.tail(10), use_container_width=True)
 
 # =========================
 # RESET
 # =========================
 elif page == "Reset":
-    if st.button("Reset All System Data"):
-        for f in [DRAW_FILE, RL_FILE, FIN_FILE, TREND_FILE, PAIR_FILE, COMMENTARY_FILE]:
-            if os.path.exists(f):
-                os.remove(f)
-        st.cache_data.clear()
-        st.success("Full system reset complete")
+    st.title("⚠️ Reset All Data")
+    st.markdown("""
+    <p style="color: #fbbf24;">
+        This action will permanently delete all saved draws, finance data, trends, pairs, commentary, and RL models.
+        <b>Use with caution!</b>
+    </p>
+    """, unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown("<br>", unsafe_allow_html=True)
+        reset_col1, reset_col2, reset_col3 = st.columns([1,2,1])
+        with reset_col2:
+            if st.button("🗑️ Reset All Data", key="reset_button", help="Click to erase everything"):
+                for file in [DRAW_FILE, FIN_FILE, TREND_FILE, PAIR_FILE, COMMENTARY_FILE, RL_FILE]:
+                    if os.path.exists(file):
+                        os.remove(file)
+                st.success("✅ All data reset! Please refresh the page.")
