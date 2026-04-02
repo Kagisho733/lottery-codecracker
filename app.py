@@ -478,6 +478,8 @@ elif page == "History":
 # =========================
 elif page == "Finance":
     st.subheader("💰 Finance Tracker")
+    
+    # Add new entry
     with st.form("finance_form"):
         stake = st.number_input("Stake Amount", min_value=0.0, step=1.0)
         profit = st.number_input("Profit Amount", step=1.0)
@@ -486,7 +488,26 @@ elif page == "Finance":
         save_finance({"stake": stake, "profit": profit, "date": str(datetime.now())})
         st.success("Finance entry added")
 
+    # Reset Finance button
+    st.markdown("---")
+    st.markdown("<b>Reset Finance Data</b>", unsafe_allow_html=True)
+    if st.button("🗑️ Reset Finance"):
+        if os.path.exists(FIN_FILE):
+            os.remove(FIN_FILE)
+        st.cache_data.clear()  # Clear cached data
+        st.success("✅ Finance data has been reset!")
+        # Mark a session state flag to refresh the table
+        st.session_state["finance_reset"] = True
+
+    # Load finance data for display
     df = pd.DataFrame(load_finance())
+    
+    # If reset was just clicked, clear the table
+    if "finance_reset" in st.session_state:
+        df = pd.DataFrame()  # empty table
+        del st.session_state["finance_reset"]
+    
+    # Display last 10 entries
     if not df.empty:
         st.dataframe(df.tail(10), use_container_width=True)
 
