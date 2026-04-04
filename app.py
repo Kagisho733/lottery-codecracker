@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import Counter
 import plotly.express as px
 import plotly.graph_objects as go
@@ -34,28 +34,49 @@ def load_json(file, default):
     except Exception:
         return default
 
+
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+
 def load_draws():
     return load_json(DRAW_FILE, [])
+
 
 def load_finance():
     return load_json(FIN_FILE, [])
 
+
 def load_pairs():
     return load_json(PAIR_FILE, {})
+
 
 def load_trend():
     return load_json(TREND_FILE, [])
 
+
 @st.cache_data(show_spinner=False)
 def load_commentary():
-    return load_json(COMMENTARY_FILE, [])
+    data = load_json(COMMENTARY_FILE, [])
+    now = datetime.now()
+    fresh = []
+
+    for item in data:
+        try:
+            saved_time = datetime.fromisoformat(item["date"])
+            if now - saved_time <= timedelta(hours=24):
+                fresh.append(item)
+        except Exception:
+            continue
+
+    save_json(COMMENTARY_FILE, fresh)
+    return fresh
+
 
 def load_rl():
     return load_json(RL_FILE, {str(n): {"a": 1, "b": 1} for n in NUMBERS})
+
 
 def save_draw(draw, comment=""):
     data = load_draws()
@@ -75,6 +96,7 @@ def save_draw(draw, comment=""):
             pairs[key] = pairs.get(key, 0) + 1
     save_json(PAIR_FILE, pairs)
 
+
 def save_finance(entry):
     data = load_finance()
     data.append(entry)
@@ -91,10 +113,12 @@ def update_rl(model, draw):
             model[k]["b"] += 1
     return model
 
+
 def rl_probs(model):
     probs = {int(k): np.random.beta(v["a"], v["b"]) for k, v in model.items()}
     total = sum(probs.values()) or 1
     return {k: v / total for k, v in probs.items()}
+
 
 @st.cache_data(show_spinner=False)
 def build_model(draw_data):
@@ -125,12 +149,14 @@ def build_model(draw_data):
 
     return draws, freq, freq_p, rec, rec_p, trans_p
 
+
 def optimize_best_picks(final_probs, min_size=4, max_size=8):
     ranked = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
     optimized = {}
     for size in range(min_size, max_size + 1):
         optimized[size] = sorted([n for n, _ in ranked[:size]])
     return optimized
+
 
 def generate_updates(freq, rec):
     msgs = []
@@ -146,6 +172,7 @@ def generate_updates(freq, rec):
     if overlap:
         msgs.append(f"🚀 Strong signals forming: {overlap[:6]}")
     return msgs
+
 
 @st.cache_data(show_spinner=False)
 def plot_heatmap(draws):
@@ -164,6 +191,7 @@ def plot_heatmap(draws):
         height=420,
     )
     return fig
+
 
 @st.cache_data(show_spinner=False)
 def plot_pair_network(pairs, top_n=15):
@@ -221,7 +249,6 @@ def plot_pair_network(pairs, top_n=15):
 # =========================
 st.markdown(f"""
 <style>
-/* Main app background: dark space + lottery sparkles */
 .stApp {{
     background:
         radial-gradient(circle at 20% 20%, rgba(255,215,0,0.2), rgba(0,0,20,0.95) 70%),
@@ -232,14 +259,10 @@ st.markdown(f"""
     color: white;
     font-family: 'Segoe UI', sans-serif;
 }}
-
-/* Container padding */
 .block-container {{
     max-width: 1600px;
     padding-top: 1rem;
 }}
-
-/* Sidebar with lottery theme */
 [data-testid="stSidebar"] {{
     background:
         linear-gradient(rgba(25,25,112,0.9), rgba(0,0,50,0.95)),
@@ -248,8 +271,6 @@ st.markdown(f"""
     background-position: center;
     color: white;
 }}
-
-/* Card styling for lottery tickets */
 .ticket-card {{
     background: rgba(20,30,50,0.85);
     border: 1px solid rgba(255,255,255,0.1);
@@ -264,11 +285,7 @@ st.markdown(f"""
     justify-content: space-between;
     transition: transform 0.2s ease-in-out;
 }}
-.ticket-card:hover {{
-    transform: scale(1.02);
-}}
-
-/* Number balls grid */
+.ticket-card:hover {{ transform: scale(1.02); }}
 .number-grid {{
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
@@ -277,7 +294,7 @@ st.markdown(f"""
     justify-items: center;
 }}
 .ball {{
-   background: radial-gradient(circle at 30% 30%, #f59e0b, #ef4444);
+    background: radial-gradient(circle at 30% 30%, #f59e0b, #ef4444);
     color: white;
     text-align: center;
     padding: 12px 0;
@@ -287,43 +304,23 @@ st.markdown(f"""
     min-width: 50px;
     min-height: 50px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    transition: transform 0.2s ease-in-out;
 }}
-.ball:hover {{
-    transform: scale(1.2);
-    box-shadow: 0 6px 18px rgba(255,200,0,0.6);
-}}
-
-/* Commentary box */
 .commentary-box {{
     background: rgba(30,41,59,0.8);
     border-left: 4px solid #22c55e;
     border-radius: 14px;
     padding: 12px;
     margin-bottom: 10px;
-    animation: glow 1.5s infinite alternate;
-}}
-
-/* Glow animation for live updates */
-@keyframes glow {{
-    from {{ box-shadow: 0 0 5px #22c55e; }}
-    to {{ box-shadow: 0 0 20px #22c55e; }}
 }}
 </style>
 """, unsafe_allow_html=True)
 
-# =========================
-# SESSION STATE
-# =========================
 if "advanced_graphs" not in st.session_state:
     st.session_state.advanced_graphs = False
 
 page = st.sidebar.radio("Navigation", ["Dashboard", "Add Draw", "History", "Finance", "Reset"])
 st.sidebar.toggle("Advanced Graphs", key="advanced_graphs")
 
-# =========================
-# ADD DRAW
-# =========================
 if page == "Add Draw":
     st.subheader("➕ Add Draw")
     with st.form("draw_form"):
@@ -344,7 +341,7 @@ if page == "Add Draw":
                 draws, freq, _, rec, _, _ = build_model(load_draws())
                 updates = generate_updates(freq, rec)
                 existing = load_commentary()
-                existing.insert(0, {"date": str(datetime.now()), "messages": updates})
+                existing.insert(0, {"date": datetime.now().isoformat(), "messages": updates})
                 save_json(COMMENTARY_FILE, existing[:20])
                 st.cache_data.clear()
 
@@ -354,9 +351,6 @@ if page == "Add Draw":
         except Exception:
             st.error("Invalid input")
 
-# =========================
-# DASHBOARD
-# =========================
 elif page == "Dashboard":
     st.title("🎰 Lottery AI PRO Dashboard")
     st.markdown("""
@@ -380,8 +374,8 @@ elif page == "Dashboard":
     spent = fin["stake"].sum() if not fin.empty else 0
     profit = fin["profit"].sum() if not fin.empty else 0
     roi = (profit / spent * 100) if spent else 0
-    c1.metric("Total Expense", f"{spent:.2f}")
-    c2.metric("Profit", f"{profit:.2f}")
+    c1.metric("Total Expense", f"R {spent:,.2f}")
+    c2.metric("Profit", f"R {profit:,.2f}")
     c3.metric("ROI", f"{roi:.2f}%")
 
     row1, row2 = st.columns([2, 1])
@@ -402,10 +396,14 @@ elif page == "Dashboard":
         st.plotly_chart(heatmap, use_container_width=True)
 
     st.subheader("📝 Live Update Commentary")
-    for item in load_commentary()[:5]:
-        st.markdown(f"<div class='commentary-box'><b>{item['date']}</b></div>", unsafe_allow_html=True)
-        for m in item["messages"]:
-            st.markdown(f"<div class='commentary-box'>{m}</div>", unsafe_allow_html=True)
+    commentary_items = load_commentary()[:5]
+    if commentary_items:
+        for item in commentary_items:
+            st.markdown(f"<div class='commentary-box'><b>{item['date']}</b></div>", unsafe_allow_html=True)
+            for m in item["messages"]:
+                st.markdown(f"<div class='commentary-box'>{m}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='commentary-box'>No live updates in the last 24 hours. Add a new draw to refresh.</div>", unsafe_allow_html=True)
 
     st.subheader("🎯 Best 4–8 Picks Optimizer")
     optimized_sets = optimize_best_picks(final)
@@ -415,16 +413,7 @@ elif page == "Dashboard":
         with tabs[idx]:
             ticket = optimized_sets[size]
             grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
-            st.markdown(
-                f"""
-                <div class='ticket-card'>
-                    <h4>🎟️ Optimized {size}-Number Ticket</h4>
-                    <p>Best statistically ranked combination based on frequency, recency, and RL confidence.</p>
-                    <div class='number-grid'>{grid}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.markdown(f"<div class='ticket-card'><h4>🎟️ Optimized {size}-Number Ticket</h4><p>Best statistically ranked combination based on frequency, recency, and RL confidence.</p><div class='number-grid'>{grid}</div></div>", unsafe_allow_html=True)
 
     st.subheader("🎯 Smart Ticket Sections")
     for sec in range(1, 5):
@@ -436,10 +425,7 @@ elif page == "Dashboard":
                 weights /= weights.sum()
                 ticket = sorted(np.random.choice(NUMBERS, balls, replace=False, p=weights))
                 grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
-                st.markdown(
-                    f"<div class='ticket-card'><b>{balls} Ball</b><div class='number-grid'>{grid}</div></div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<div class='ticket-card'><b>{balls} Ball</b><div class='number-grid'>{grid}</div></div>", unsafe_allow_html=True)
 
     st.subheader("📚 Recent History")
     hist = pd.DataFrame(data[-100:])
@@ -452,9 +438,6 @@ elif page == "Dashboard":
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 
-# =========================
-# HISTORY
-# =========================
 elif page == "History":
     df = pd.DataFrame(load_draws())
     if not df.empty:
@@ -473,13 +456,9 @@ elif page == "History":
             save_json(DRAW_FILE, cleaned.to_dict("records"))
             st.success("History saved")
 
-# =========================
-# FINANCE
-# =========================
 elif page == "Finance":
     st.subheader("💰 Finance Tracker")
-    
-    # Add new entry
+
     with st.form("finance_form"):
         stake = st.number_input("Stake Amount", min_value=0.0, step=1.0)
         profit = st.number_input("Profit Amount", step=1.0)
@@ -488,32 +467,23 @@ elif page == "Finance":
         save_finance({"stake": stake, "profit": profit, "date": str(datetime.now())})
         st.success("Finance entry added")
 
-    # Reset Finance button
     st.markdown("---")
     st.markdown("<b>Reset Finance Data</b>", unsafe_allow_html=True)
     if st.button("🗑️ Reset Finance"):
         if os.path.exists(FIN_FILE):
             os.remove(FIN_FILE)
-        st.cache_data.clear()  # Clear cached data
+        st.cache_data.clear()
         st.success("✅ Finance data has been reset!")
-        # Mark a session state flag to refresh the table
         st.session_state["finance_reset"] = True
 
-    # Load finance data for display
     df = pd.DataFrame(load_finance())
-    
-    # If reset was just clicked, clear the table
     if "finance_reset" in st.session_state:
-        df = pd.DataFrame()  # empty table
+        df = pd.DataFrame()
         del st.session_state["finance_reset"]
-    
-    # Display last 10 entries
+
     if not df.empty:
         st.dataframe(df.tail(10), use_container_width=True)
 
-# =========================
-# RESET
-# =========================
 elif page == "Reset":
     st.title("⚠️ Reset All Data")
     st.markdown("""
