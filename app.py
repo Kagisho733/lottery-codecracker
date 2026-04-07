@@ -1,132 +1,98 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
-import json
+import base64
 from datetime import datetime, timedelta
 from collections import Counter
 import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-st.set_page_config(page_title="Lottery AI PRO v8 SaaS", layout="wide")
-
-# =========================
-# FILES & CONSTANTS
-# =========================
-DRAW_FILE = "draws.json"
-RL_FILE = "rl_model.json"
-FIN_FILE = "finance.json"
-TREND_FILE = "trend.json"
-PAIR_FILE = "pairs.json"
-COMMENTARY_FILE = "commentary.json"
+# =====================================================
+# PAGE CONFIG
+# =====================================================
+st.set_page_config(page_title="Lottery AI PRO FINAL", layout="wide")
 NUMBERS = list(range(1, 25))
 
-# =========================
-# STORAGE FUNCTIONS
-# =========================
-def load_json(file, default):
-    if not os.path.exists(file):
-        return default
+# =====================================================
+# LOCAL IMAGE LOADER
+# =====================================================
+def get_base64(file_path):
+    with open(file_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+dashboard_bg = get_base64("assets/dashboard_bg.jpg.webp")
+sidebar_bg = get_base64("assets/sidebar_bg.jpg.webp")
+
+# =====================================================
+# FIREBASE INIT
+# =====================================================
+@st.cache_resource
+def init_firebase():
     try:
-        with open(file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
+        if firebase_admin._apps:
+            return firestore.client()
 
+        config = dict(st.secrets["FIREBASE"])
+        config["private_key"] = config["private_key"].replace("\\n", "\n").strip()
+        cred = credentials.Certificate(config)
+        firebase_admin.initialize_app(cred)
+        return firestore.client()
+    except Exception as e:
+        st.error(f"🔥 Firebase auth failed: {e}")
+        return None
 
-def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+db = init_firebase()
 
+COLLECTIONS = {
+    "draws": "draws",
+    "finance": "finance",
+    "commentary": "commentary",
+    "pairs": "pairs",
+    "rl_model": "rl_model",
+    "trend": "trend",
+}
 
-def load_draws():
-    return load_json(DRAW_FILE, [])
+# =====================================================
+# FIREBASE HELPERS
+# =====================================================
+@st.cache_data(ttl=30, show_spinner=False)
+def get_collection_docs(name, limit=300):
+    if db is None:
+        return []
+    docs = db.collection(COLLECTIONS[name]).limit(limit).get()
+    return [{**doc.to_dict(), "_id": doc.id} for doc in docs]
 
+def add_doc(name, data):
+    db.collection(COLLECTIONS[name]).add(data)
+    st.cache_data.clear()
 
-def load_finance():
-    return load_json(FIN_FILE, [])
+def delete_doc(name, doc_id):
+    db.collection(COLLECTIONS[name]).document(doc_id).delete()
+    st.cache_data.clear()
 
+def reset_collection(name):
+    docs = db.collection(COLLECTIONS[name]).limit(500).get()
+    for doc in docs:
+        doc.reference.delete()
+    st.cache_data.clear()
 
-def load_pairs():
-    return load_json(PAIR_FILE, {})
-
-
-def load_trend():
-    return load_json(TREND_FILE, [])
-
-
+# =====================================================
+# ANALYTICS
+# =====================================================
 @st.cache_data(show_spinner=False)
-def load_commentary():
-    data = load_json(COMMENTARY_FILE, [])
-    now = datetime.now()
-    fresh = []
+def build_model(draws_data):
+    draws = [x["numbers"] for x in draws_data if "numbers" in x]
 
-    for item in data:
-        try:
-            saved_time = datetime.fromisoformat(item["date"])
-            if now - saved_time <= timedelta(hours=24):
-                fresh.append(item)
-        except Exception:
-            continue
+    if not draws:
+        return [], Counter(), {}, {}, {}
 
-    save_json(COMMENTARY_FILE, fresh)
-    return fresh
-
-
-def load_rl():
-    return load_json(RL_FILE, {str(n): {"a": 1, "b": 1} for n in NUMBERS})
-
-
-def save_draw(draw, comment=""):
-    data = load_draws()
-    entry = {"numbers": draw, "date": str(datetime.now()), "comment": comment}
-    data.append(entry)
-    save_json(DRAW_FILE, data)
-
-    trend = load_trend()
-    trend.append({"date": entry["date"], "numbers": draw})
-    save_json(TREND_FILE, trend)
-
-    pairs = load_pairs()
-    for i in range(len(draw)):
-        for j in range(i + 1, len(draw)):
-            a, b = sorted([draw[i], draw[j]])
-            key = f"{a}-{b}"
-            pairs[key] = pairs.get(key, 0) + 1
-    save_json(PAIR_FILE, pairs)
-
-
-def save_finance(entry):
-    data = load_finance()
-    data.append(entry)
-    save_json(FIN_FILE, data)
-
-# =========================
-# RL + ANALYTICS
-# =========================
-def update_rl(model, draw):
-    for k in model:
-        if int(k) in draw:
-            model[k]["a"] += 2
-        else:
-            model[k]["b"] += 1
-    return model
-
-
-def rl_probs(model):
-    probs = {int(k): np.random.beta(v["a"], v["b"]) for k, v in model.items()}
-    total = sum(probs.values()) or 1
-    return {k: v / total for k, v in probs.items()}
-
-
-@st.cache_data(show_spinner=False)
-def build_model(draw_data):
-    draws = [x["numbers"] for x in draw_data]
     freq = Counter(n for row in draws for n in row)
 
     rec = {n: 0 for n in NUMBERS}
-    for i, row in enumerate(reversed(draws)):
+    for i, row in enumerate(reversed(draws[-100:])):
         w = 0.9 ** i
         for n in row:
             rec[n] += w
@@ -136,76 +102,82 @@ def build_model(draw_data):
     rec_sum = sum(rec.values()) or 1
     rec_p = {n: rec[n] / rec_sum for n in NUMBERS}
 
-    trans = {n: Counter() for n in NUMBERS}
-    for i in range(1, len(draws)):
-        for prev in draws[i - 1]:
-            for curr in draws[i]:
-                trans[prev][curr] += 1
+    return draws, freq, freq_p, rec, rec_p
 
-    trans_p = {}
-    for n in NUMBERS:
-        t = sum(trans[n].values()) or 1
-        trans_p[n] = {k: v / t for k, v in trans[n].items()}
-
-    return draws, freq, freq_p, rec, rec_p, trans_p
-
-
-def optimize_best_picks(final_probs, min_size=4, max_size=8):
+def optimize_best_picks(final_probs):
     ranked = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
-    optimized = {}
-    for size in range(min_size, max_size + 1):
-        optimized[size] = sorted([n for n, _ in ranked[:size]])
-    return optimized
-
+    return {size: sorted([n for n, _ in ranked[:size]]) for size in range(4, 9)}
 
 def generate_updates(freq, rec):
     msgs = []
     avg_freq = np.mean(list(freq.values())) if freq else 0
     avg_rec = np.mean(list(rec.values())) if rec else 0
+
     hot = [n for n in NUMBERS if freq[n] > avg_freq][:6]
     rising = [n for n in NUMBERS if rec[n] > avg_rec][:6]
+    overlap = list(set(hot).intersection(set(rising)))[:6]
+
     if hot:
         msgs.append(f"🔥 Hot numbers picking up: {hot}")
     if rising:
         msgs.append(f"📈 Rising trend numbers: {rising}")
-    overlap = list(set(hot).intersection(set(rising)))
     if overlap:
-        msgs.append(f"🚀 Strong signals forming: {overlap[:6]}")
+        msgs.append(f"🚀 Strong signals forming: {overlap}")
     return msgs
 
+# =====================================================
+# SAVE DRAW
+# =====================================================
+def save_draw_to_firebase(nums, comment):
+    now = datetime.now().isoformat()
 
-@st.cache_data(show_spinner=False)
+    add_doc("draws", {"numbers": nums, "comment": comment, "date": now})
+    add_doc("trend", {"numbers": nums, "date": now})
+
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            pair = f"{min(nums[i], nums[j])}-{max(nums[i], nums[j])}"
+            add_doc("pairs", {"pair": pair, "date": now})
+
+    add_doc("commentary", {
+        "date": now,
+        "messages": [f"✅ New draw inserted: {nums}"]
+    })
+
+# =====================================================
+# PLOTS
+# =====================================================
+def transparent_chart(fig, height=420):
+    fig.update_layout(
+        height=height,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
+    )
+    return fig
+
 def plot_heatmap(draws):
     if not draws:
         return None
     fig = px.imshow(
-        pd.DataFrame(draws),
+        pd.DataFrame(draws[-100:]),
         aspect="auto",
         color_continuous_scale="Turbo",
-        template="plotly_dark",
+        template="plotly_dark"
     )
-    fig.update_layout(
-        margin=dict(l=10, r=10, t=40, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        height=420,
-    )
-    return fig
+    return transparent_chart(fig)
 
-
-@st.cache_data(show_spinner=False)
-def plot_pair_network(pairs, top_n=15):
-    if not pairs:
+def plot_pair_network(pairs_docs):
+    if not pairs_docs:
         return None
 
-    items = sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    pair_counts = Counter([x["pair"] for x in pairs_docs if "pair" in x])
     G = nx.Graph()
 
-    for key, value in items:
-        a, b = map(int, key.split("-"))
-        G.add_edge(a, b, weight=value)
+    for pair, count in pair_counts.most_common(20):
+        a, b = map(int, pair.split("-"))
+        G.add_edge(a, b, weight=count)
 
-    pos = nx.spring_layout(G, seed=42, iterations=20)
+    pos = nx.spring_layout(G, seed=42)
 
     edge_x, edge_y = [], []
     for edge in G.edges():
@@ -222,283 +194,261 @@ def plot_pair_network(pairs, top_n=15):
         labels.append(str(node))
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines", line=dict(width=1)))
-    fig.add_trace(
-        go.Scatter(
-            x=node_x,
-            y=node_y,
-            mode="markers+text",
-            text=labels,
-            textposition="top center",
-            marker=dict(size=20),
-        )
-    )
+    fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines"))
+    fig.add_trace(go.Scatter(
+        x=node_x, y=node_y,
+        mode="markers+text",
+        text=labels,
+        textposition="top center",
+        marker=dict(size=22)
+    ))
     fig.update_layout(
         showlegend=False,
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
-        margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        height=600,
+        height=550
     )
     return fig
 
-# =========================
-# LOTTERY THEME CSS
-# =========================
+# =====================================================
+# BEAUTIFUL PREMIUM CSS
+# =====================================================
 st.markdown(f"""
 <style>
 .stApp {{
     background:
-        radial-gradient(circle at 20% 20%, rgba(255,215,0,0.2), rgba(0,0,20,0.95) 70%),
-        url('https://images.unsplash.com/photo-1614761356785-c7f3fda25c62?auto=format&fit=crop&w=1600&q=80');
+        linear-gradient(rgba(5,10,30,0.82), rgba(5,10,30,0.92)),
+        url("data:image/webp;base64,{dashboard_bg}");
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
     color: white;
-    font-family: 'Segoe UI', sans-serif;
 }}
-.block-container {{
-    max-width: 1600px;
-    padding-top: 1rem;
-}}
+
 [data-testid="stSidebar"] {{
     background:
-        linear-gradient(rgba(25,25,112,0.9), rgba(0,0,50,0.95)),
-        url('https://images.unsplash.com/photo-1614761356785-c7f3fda25c62?auto=format&fit=crop&w=800&q=80');
+        linear-gradient(rgba(10,20,60,0.88), rgba(5,10,30,0.95)),
+        url("data:image/webp;base64,{sidebar_bg}");
     background-size: cover;
-    background-position: center;
-    color: white;
 }}
+
 .ticket-card {{
-    background: rgba(20,30,50,0.85);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(15,23,42,0.72);
+    border: 1px solid rgba(255,255,255,0.08);
     border-top: 4px solid #fbbf24;
-    border-radius: 20px;
-    padding: 18px;
-    margin-bottom: 16px;
-    box-shadow: 0 10px 35px rgba(0,0,0,0.3);
-    min-height: 240px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    transition: transform 0.2s ease-in-out;
+    border-radius: 24px;
+    padding: 20px;
+    margin-bottom: 18px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 30px rgba(251,191,36,0.35);
+    transition: 0.3s ease;
 }}
-.ticket-card:hover {{ transform: scale(1.02); }}
+.ticket-card:hover {{
+    transform: translateY(-3px);
+    box-shadow: 0 0 40px rgba(251,191,36,0.6);
+}}
+
 .number-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
-    gap: 12px;
-    margin-top: 14px;
-    justify-items: center;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(50px,1fr));
+    gap:12px;
+    margin-top:14px;
+    justify-items:center;
 }}
+
 .ball {{
-    background: radial-gradient(circle at 30% 30%, #f59e0b, #ef4444);
-    color: white;
-    text-align: center;
-    padding: 12px 0;
-    border-radius: 50%;
-    font-weight: 900;
-    font-size: 16px;
-    min-width: 50px;
-    min-height: 50px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    background: radial-gradient(circle at 30% 30%, #fbbf24, #ef4444);
+    color:white;
+    border-radius:50%;
+    font-weight:900;
+    padding:12px 0;
+    text-align:center;
+    min-width:50px;
+    box-shadow: 0 0 16px rgba(251,191,36,0.5);
 }}
+
 .commentary-box {{
-    background: rgba(30,41,59,0.8);
-    border-left: 4px solid #22c55e;
-    border-radius: 14px;
-    padding: 12px;
-    margin-bottom: 10px;
+    background: rgba(30,41,59,0.75);
+    border-left:4px solid #22c55e;
+    border-radius:14px;
+    padding:12px;
+    margin-bottom:10px;
+}}
+
+@media (max-width:768px) {{
+    .number-grid {{
+        grid-template-columns: repeat(4, 1fr);
+    }}
 }}
 </style>
 """, unsafe_allow_html=True)
 
-if "advanced_graphs" not in st.session_state:
-    st.session_state.advanced_graphs = False
-
+# =====================================================
+# SIDEBAR
+# =====================================================
 page = st.sidebar.radio("Navigation", ["Dashboard", "Add Draw", "History", "Finance", "Reset"])
-st.sidebar.toggle("Advanced Graphs", key="advanced_graphs")
+advanced_graphs = st.sidebar.toggle("Advanced Graphs")
 
+# =====================================================
+# ADD DRAW
+# =====================================================
 if page == "Add Draw":
     st.subheader("➕ Add Draw")
     with st.form("draw_form"):
-        inp = st.text_input("Enter 12 numbers comma separated")
+        inp = st.text_input("Enter 12 unique numbers comma separated")
         comment = st.text_input("Commentary")
         submitted = st.form_submit_button("Save Draw")
 
     if submitted:
-        try:
-            nums = [int(x.strip()) for x in inp.split(",") if x.strip()]
-            if len(nums) != 12 or len(set(nums)) != 12:
-                st.error("Enter exactly 12 unique numbers")
-            else:
-                save_draw(nums, comment)
-                rl = update_rl(load_rl(), nums)
-                save_json(RL_FILE, rl)
+        nums = [int(x.strip()) for x in inp.split(",") if x.strip()]
+        if len(nums) == 12 and len(set(nums)) == 12:
+            save_draw_to_firebase(nums, comment)
+            st.success("✅ Draw saved")
 
-                draws, freq, _, rec, _, _ = build_model(load_draws())
-                updates = generate_updates(freq, rec)
-                existing = load_commentary()
-                existing.insert(0, {"date": datetime.now().isoformat(), "messages": updates})
-                save_json(COMMENTARY_FILE, existing[:20])
-                st.cache_data.clear()
-
-                st.success("Draw saved + analysis updated")
-                for msg in updates:
-                    st.info(msg)
-        except Exception:
-            st.error("Invalid input")
-
+# =====================================================
+# DASHBOARD
+# =====================================================
 elif page == "Dashboard":
     st.title("🎰 Lottery AI PRO Dashboard")
+
     st.markdown("""
     <div class='ticket-card'>
-        <h3>🎉 Welcome back</h3>
-        <p>Your smart lottery SaaS workspace is live with predictive analytics, finance, and ticket intelligence.</p>
+        <h3>🎉 Welcome Back</h3>
+        <p>Your predictive lottery SaaS workspace is fully synced with Firebase, advanced charts, smart ticket generation, finance tracking, commentary intelligence, and real-time trend analysis.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    data = load_draws()
-    if not data:
-        st.warning("Add draws first")
+    draws_data = get_collection_docs("draws", 150)
+    finance_data = get_collection_docs("finance", 200)
+    commentary_data = get_collection_docs("commentary", 10)
+    pairs_data = get_collection_docs("pairs", 300)
+
+    if not draws_data:
+        st.warning("No draws yet")
         st.stop()
 
-    draws, freq, freq_p, rec, rec_p, trans_p = build_model(data)
-    rl = rl_probs(load_rl())
-    final = {n: ((0.6 * freq_p[n] + 0.4 * rec_p[n]) * 0.6) + rl[n] * 0.4 for n in NUMBERS}
+    draws, freq, freq_p, rec, rec_p = build_model(draws_data)
 
-    fin = pd.DataFrame(load_finance())
-    c1, c2, c3 = st.columns(3)
-    spent = fin["stake"].sum() if not fin.empty else 0
-    profit = fin["profit"].sum() if not fin.empty else 0
+    final_probs = {
+        n: ((0.6 * freq_p[n] + 0.4 * rec_p[n]) * 0.6) + 0.4 * np.random.rand()
+        for n in NUMBERS
+    }
+
+    fin_df = pd.DataFrame(finance_data)
+    spent = fin_df["stake"].sum() if not fin_df.empty else 0
+    profit = fin_df["profit"].sum() if not fin_df.empty else 0
     roi = (profit / spent * 100) if spent else 0
-    c1.metric("Total Expense", f"R {spent:,.2f}")
-    c2.metric("Profit", f"R {profit:,.2f}")
-    c3.metric("ROI", f"{roi:.2f}%")
 
-    row1, row2 = st.columns([2, 1])
-    with row1:
-        prob_df = pd.DataFrame({"Number": list(final.keys()), "Prob": list(final.values())})
-        fig_prob = px.bar(prob_df, x="Number", y="Prob", title="🎯 Probability Strength", template="plotly_dark")
-        fig_prob.update_layout(height=420, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_prob, use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💸 Expense", f"R {spent:,.2f}")
+    c2.metric("💰 Profit", f"R {profit:,.2f}")
+    c3.metric("📈 ROI", f"{roi:.2f}%")
 
-    with row2:
-        freq_df = pd.DataFrame({"Number": list(freq.keys()), "Frequency": list(freq.values())})
-        fig_freq = px.bar(freq_df, x="Number", y="Frequency", title="📈 Frequency", template="plotly_dark")
-        fig_freq.update_layout(height=420, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_freq, use_container_width=True)
+    col1, col2 = st.columns(2)
+
+    prob_df = pd.DataFrame({"Number": list(final_probs.keys()), "Probability": list(final_probs.values())})
+    freq_df = pd.DataFrame({"Number": list(freq.keys()), "Frequency": list(freq.values())})
+
+    with col1:
+        st.plotly_chart(
+            transparent_chart(px.bar(prob_df, x="Number", y="Probability", template="plotly_dark")),
+            use_container_width=True
+        )
+
+    with col2:
+        st.plotly_chart(
+            transparent_chart(px.bar(freq_df, x="Number", y="Frequency", template="plotly_dark")),
+            use_container_width=True
+        )
 
     heatmap = plot_heatmap(draws)
     if heatmap:
         st.plotly_chart(heatmap, use_container_width=True)
 
     st.subheader("📝 Live Update Commentary")
-    commentary_items = load_commentary()[:5]
-    if commentary_items:
-        for item in commentary_items:
-            st.markdown(f"<div class='commentary-box'><b>{item['date']}</b></div>", unsafe_allow_html=True)
-            for m in item["messages"]:
-                st.markdown(f"<div class='commentary-box'>{m}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='commentary-box'>No live updates in the last 24 hours. Add a new draw to refresh.</div>", unsafe_allow_html=True)
+    for row in commentary_data:
+        for msg in row.get("messages", []):
+            st.markdown(f"<div class='commentary-box'>{msg}</div>", unsafe_allow_html=True)
 
     st.subheader("🎯 Best 4–8 Picks Optimizer")
-    optimized_sets = optimize_best_picks(final)
+    best_sets = optimize_best_picks(final_probs)
 
-    tabs = st.tabs(["4 Picks", "5 Picks", "6 Picks", "7 Picks", "8 Picks"])
-    for idx, size in enumerate(range(4, 9)):
-        with tabs[idx]:
-            ticket = optimized_sets[size]
-            grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
-            st.markdown(f"<div class='ticket-card'><h4>🎟️ Optimized {size}-Number Ticket</h4><p>Best statistically ranked combination based on frequency, recency, and RL confidence.</p><div class='number-grid'>{grid}</div></div>", unsafe_allow_html=True)
+    tabs = st.tabs(["4", "5", "6", "7", "8"])
+    for i, size in enumerate(range(4, 9)):
+        with tabs[i]:
+            grid = "".join([f"<div class='ball'>{n}</div>" for n in best_sets[size]])
+            st.markdown(f"""
+            <div class='ticket-card'>
+                <h4>🎟️ Best {size} Picks</h4>
+                <p>Optimized from live probability signals.</p>
+                <div class='number-grid'>{grid}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    st.subheader("🎯 Smart Ticket Sections")
+    st.subheader("🎟️ Smart Ticket Sections")
     for sec in range(1, 5):
         st.markdown(f"### Section {sec}")
         cols = st.columns(4)
-        for i, balls in enumerate(range(1, 9)):
+        for i in range(8):
+            weights = np.array(list(final_probs.values()))
+            weights /= weights.sum()
+            ticket = sorted(np.random.choice(NUMBERS, i+1, replace=False, p=weights))
+            grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
+
             with cols[i % 4]:
-                weights = np.array(list(final.values()))
-                weights /= weights.sum()
-                ticket = sorted(np.random.choice(NUMBERS, balls, replace=False, p=weights))
-                grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
-                st.markdown(f"<div class='ticket-card'><b>{balls} Ball</b><div class='number-grid'>{grid}</div></div>", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class='ticket-card'>
+                    <b>{i+1} Balls</b>
+                    <div class='number-grid'>{grid}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
     st.subheader("📚 Recent History")
-    hist = pd.DataFrame(data[-100:])
-    hist.insert(0, "No", range(1, len(hist) + 1))
-    st.dataframe(hist.tail(10), use_container_width=True)
+    hist_df = pd.DataFrame(draws_data[-10:])
+    show_cols = [c for c in ["numbers", "comment", "date"] if c in hist_df.columns]
+    st.dataframe(hist_df[show_cols], use_container_width=True)
 
-    if st.session_state.advanced_graphs:
+    if advanced_graphs:
         st.subheader("🕸️ Advanced Pair Graph")
-        fig = plot_pair_network(load_pairs())
+        fig = plot_pair_network(pairs_data)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
 
+# =====================================================
+# HISTORY
+# =====================================================
 elif page == "History":
-    df = pd.DataFrame(load_draws())
-    if not df.empty:
-        df.insert(0, "No", range(1, len(df) + 1))
-        st.subheader("📚 History Manager")
-        edited = st.data_editor(df, use_container_width=True, num_rows="dynamic")
+    st.subheader("📚 History Manager")
+    history_data = get_collection_docs("draws", 300)
+    df = pd.DataFrame(history_data)
+    st.dataframe(df[["numbers", "comment", "date", "_id"]], use_container_width=True)
 
-        if st.button("Remove Duplicate Rows"):
-            cleaned = edited.drop_duplicates(subset=["numbers", "date"]).reset_index(drop=True)
-            cleaned = cleaned.drop(columns=["No"], errors="ignore")
-            save_json(DRAW_FILE, cleaned.to_dict("records"))
-            st.success("Duplicates removed")
-
-        if st.button("Save History"):
-            cleaned = edited.drop(columns=["No"], errors="ignore")
-            save_json(DRAW_FILE, cleaned.to_dict("records"))
-            st.success("History saved")
-
+# =====================================================
+# FINANCE
+# =====================================================
 elif page == "Finance":
-    st.subheader("💰 Finance Tracker")
-
+    st.subheader("💵 Finance Tracker")
     with st.form("finance_form"):
-        stake = st.number_input("Stake Amount", min_value=0.0, step=1.0)
-        profit = st.number_input("Profit Amount", step=1.0)
-        submitted = st.form_submit_button("Add Entry")
+        stake = st.number_input("Stake", min_value=0.0)
+        profit = st.number_input("Profit")
+        submitted = st.form_submit_button("Save")
+
     if submitted:
-        save_finance({"stake": stake, "profit": profit, "date": str(datetime.now())})
-        st.success("Finance entry added")
+        add_doc("finance", {
+            "stake": stake,
+            "profit": profit,
+            "date": datetime.now().isoformat()
+        })
+        st.success("✅ Finance saved")
 
-    st.markdown("---")
-    st.markdown("<b>Reset Finance Data</b>", unsafe_allow_html=True)
-    if st.button("🗑️ Reset Finance"):
-        if os.path.exists(FIN_FILE):
-            os.remove(FIN_FILE)
-        st.cache_data.clear()
-        st.success("✅ Finance data has been reset!")
-        st.session_state["finance_reset"] = True
-
-    df = pd.DataFrame(load_finance())
-    if "finance_reset" in st.session_state:
-        df = pd.DataFrame()
-        del st.session_state["finance_reset"]
-
-    if not df.empty:
-        st.dataframe(df.tail(10), use_container_width=True)
-
+# =====================================================
+# RESET
+# =====================================================
 elif page == "Reset":
-    st.title("⚠️ Reset All Data")
-    st.markdown("""
-    <p style="color: #fbbf24;">
-        This action will permanently delete all saved draws, finance data, trends, pairs, commentary, and RL models.
-        <b>Use with caution!</b>
-    </p>
-    """, unsafe_allow_html=True)
-
-    with st.container():
-        st.markdown("<br>", unsafe_allow_html=True)
-        reset_col1, reset_col2, reset_col3 = st.columns([1,2,1])
-        with reset_col2:
-            if st.button("🗑️ Reset All Data", key="reset_button", help="Click to erase everything"):
-                for file in [DRAW_FILE, FIN_FILE, TREND_FILE, PAIR_FILE, COMMENTARY_FILE, RL_FILE]:
-                    if os.path.exists(file):
-                        os.remove(file)
-                st.success("✅ All data reset! Please refresh the page.")
+    st.title("⚠️ Reset All Firebase Data")
+    if st.button("🗑️ Reset Everything"):
+        for name in COLLECTIONS:
+            reset_collection(name)
+        st.success("✅ All Firebase collections reset")
