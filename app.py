@@ -13,7 +13,7 @@ from firebase_admin import credentials, firestore
 # =====================================================
 # PAGE CONFIG
 # =====================================================
-st.set_page_config(page_title="Lottery AI PRO FINAL", layout="wide")
+st.set_page_config(page_title="Lottery AI PRO FINAL", layout="centered")
 NUMBERS = list(range(1, 25))
 
 # =====================================================
@@ -131,18 +131,43 @@ def generate_updates(freq, rec):
 def save_draw_to_firebase(nums, comment):
     now = datetime.now().isoformat()
 
-    add_doc("draws", {"numbers": nums, "comment": comment, "date": now})
-    add_doc("trend", {"numbers": nums, "date": now})
+    # save draw
+    add_doc("draws", {
+        "numbers": nums,
+        "comment": comment,
+        "date": now
+    })
 
+    # save trend
+    add_doc("trend", {
+        "numbers": nums,
+        "date": now
+    })
+
+    # save pairs
     for i in range(len(nums)):
         for j in range(i + 1, len(nums)):
             pair = f"{min(nums[i], nums[j])}-{max(nums[i], nums[j])}"
-            add_doc("pairs", {"pair": pair, "date": now})
+            add_doc("pairs", {
+                "pair": pair,
+                "date": now
+            })
 
+    # build live update messages
+    draws_data = get_collection_docs("draws", 150)
+    draws, freq, freq_p, rec, rec_p = build_model(draws_data)
+    updates = generate_updates(freq, rec)
+
+    messages = [f"✅ New draw inserted: {nums}"]
+    messages.extend(updates)
+
+    # commentary save
     add_doc("commentary", {
         "date": now,
-        "messages": [f"✅ New draw inserted: {nums}"]
+        "messages": messages
     })
+
+    return messages
 
 # =====================================================
 # PLOTS
@@ -277,11 +302,7 @@ st.markdown(f"""
     margin-bottom:10px;
 }}
 
-@media (max-width:768px) {{
-    .number-grid {{
-        grid-template-columns: repeat(4, 1fr);
-    }}
-}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -304,8 +325,14 @@ if page == "Add Draw":
     if submitted:
         nums = [int(x.strip()) for x in inp.split(",") if x.strip()]
         if len(nums) == 12 and len(set(nums)) == 12:
-            save_draw_to_firebase(nums, comment)
-            st.success("✅ Draw saved")
+            updates = save_draw_to_firebase(nums, comment)
+
+            st.success("✅ Draw saved successfully")
+
+            for msg in updates:
+                st.info(msg)
+        else:
+            st.error("Enter exactly 12 unique numbers.")
 
 # =====================================================
 # DASHBOARD
@@ -341,10 +368,32 @@ elif page == "Dashboard":
     profit = fin_df["profit"].sum() if not fin_df.empty else 0
     roi = (profit / spent * 100) if spent else 0
 
+    profit_color = "green" if profit >= 0 else "red"
+    roi_color = "green" if roi >= 0 else "red"
+
     c1, c2, c3 = st.columns(3)
+
     c1.metric("💸 Expense", f"R {spent:,.2f}")
-    c2.metric("💰 Profit", f"R {profit:,.2f}")
-    c3.metric("📈 ROI", f"{roi:.2f}%")
+
+    c2.markdown(
+        f"""
+        <div class='ticket-card'>
+            <h4>💰 Profit</h4>
+            <h2 style='color:{profit_color};'>R {profit:,.2f}</h2>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    c3.markdown(
+        f"""
+        <div class='ticket-card'>
+            <h4>📈 ROI</h4>
+            <h2 style='color:{roi_color};'>{roi:.2f}%</h2>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     col1, col2 = st.columns(2)
 
@@ -363,67 +412,75 @@ elif page == "Dashboard":
             use_container_width=True
         )
 
-    heatmap = plot_heatmap(draws)
-    if heatmap:
-        st.plotly_chart(heatmap, use_container_width=True)
+        heatmap = plot_heatmap(draws)
+        if heatmap:
+            st.plotly_chart(heatmap, use_container_width=True)
 
-    st.subheader("📝 Live Update Commentary")
-    for row in commentary_data:
-        for msg in row.get("messages", []):
-            st.markdown(f"<div class='commentary-box'>{msg}</div>", unsafe_allow_html=True)
+        st.subheader("📝 Live Update Commentary")
+        for row in commentary_data:
+            for msg in row.get("messages", []):
+                st.markdown(f"<div class='commentary-box'>{msg}</div>", unsafe_allow_html=True)
 
-    st.subheader("🎯 Best 4–8 Picks Optimizer")
-    best_sets = optimize_best_picks(final_probs)
+        st.subheader("🎯 Best 4–8 Picks Optimizer")
+        best_sets = optimize_best_picks(final_probs)
 
-    tabs = st.tabs(["4", "5", "6", "7", "8"])
-    for i, size in enumerate(range(4, 9)):
-        with tabs[i]:
-            grid = "".join([f"<div class='ball'>{n}</div>" for n in best_sets[size]])
-            st.markdown(f"""
-            <div class='ticket-card'>
-                <h4>🎟️ Best {size} Picks</h4>
-                <p>Optimized from live probability signals.</p>
-                <div class='number-grid'>{grid}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.subheader("🎟️ Smart Ticket Sections")
-    for sec in range(1, 5):
-        st.markdown(f"### Section {sec}")
-        cols = st.columns(4)
-        for i in range(8):
-            weights = np.array(list(final_probs.values()))
-            weights /= weights.sum()
-            ticket = sorted(np.random.choice(NUMBERS, i+1, replace=False, p=weights))
-            grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
-
-            with cols[i % 4]:
+        tabs = st.tabs(["4", "5", "6", "7", "8"])
+        for i, size in enumerate(range(4, 9)):
+            with tabs[i]:
+                grid = "".join([f"<div class='ball'>{n}</div>" for n in best_sets[size]])
                 st.markdown(f"""
                 <div class='ticket-card'>
-                    <b>{i+1} Balls</b>
+                    <h4>🎟️ Best {size} Picks</h4>
+                    <p>Optimized from live probability signals.</p>
                     <div class='number-grid'>{grid}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-    st.subheader("📚 Recent History")
-    hist_df = pd.DataFrame(draws_data[-10:])
-    show_cols = [c for c in ["numbers", "comment", "date"] if c in hist_df.columns]
-    st.dataframe(hist_df[show_cols], use_container_width=True)
+        st.subheader("🎟️ Smart Ticket Sections")
+        for sec in range(1, 5):
+            st.markdown(f"### Section {sec}")
+            cols = st.columns(4)
+            for i in range(8):
+                weights = np.array(list(final_probs.values()))
+                weights /= weights.sum()
+                ticket = sorted(np.random.choice(NUMBERS, i+1, replace=False, p=weights))
+                grid = "".join([f"<div class='ball'>{n}</div>" for n in ticket])
 
-    if advanced_graphs:
-        st.subheader("🕸️ Advanced Pair Graph")
-        fig = plot_pair_network(pairs_data)
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
+                with cols[i % 4]:
+                    st.markdown(f"""
+                    <div class='ticket-card'>
+                        <b>{i+1} Balls</b>
+                        <div class='number-grid'>{grid}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.subheader("📚 Recent History")
+        hist_df = pd.DataFrame(draws_data[-10:])
+        show_cols = [c for c in ["numbers", "comment", "date"] if c in hist_df.columns]
+        st.dataframe(hist_df[show_cols], use_container_width=True)
+
+        if advanced_graphs:
+            st.subheader("🕸️ Advanced Pair Graph")
+            fig = plot_pair_network(pairs_data)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
 
 # =====================================================
 # HISTORY
 # =====================================================
 elif page == "History":
+
     st.subheader("📚 History Manager")
     history_data = get_collection_docs("draws", 300)
     df = pd.DataFrame(history_data)
     st.dataframe(df[["numbers", "comment", "date", "_id"]], use_container_width=True)
+    
+    if not df.empty:
+        if st.button("🗑️ Delete Latest Row"):
+            latest_id = df.iloc[-1]["_id"]
+            delete_doc("draws", latest_id)
+            st.success("✅ Latest row deleted successfully")
+            st.rerun()
 
 # =====================================================
 # FINANCE
@@ -443,6 +500,12 @@ elif page == "Finance":
         })
         st.success("✅ Finance saved")
 
+    st.markdown("---")
+
+    if st.button("🗑️ Reset Finance Data"):
+        reset_collection("finance")
+        st.success("✅ Finance data has been reset")
+
 # =====================================================
 # RESET
 # =====================================================
@@ -451,4 +514,4 @@ elif page == "Reset":
     if st.button("🗑️ Reset Everything"):
         for name in COLLECTIONS:
             reset_collection(name)
-        st.success("✅ All Firebase collections reset")
+        st.success("✅ Reset completed successfully. All collections were cleared.")
