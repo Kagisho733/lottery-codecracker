@@ -648,11 +648,39 @@ def plot_pair_network(pairs_docs):
     return fig
 
 # =====================================================
-# PREMIUM CSS
+# DYNAMIC ADMIN CSS
 # =====================================================
+
+if IS_ADMIN:
+
+    HIDE_STREAMLIT_STYLE = ""
+
+else:
+
+    HIDE_STREAMLIT_STYLE = """
+
+    #MainMenu {
+        visibility: hidden;
+    }
+
+    header {
+        visibility: hidden;
+    }
+
+    footer {
+        visibility: hidden;
+    }
+
+    [data-testid="stToolbar"] {
+        display: none;
+    }
+
+    """
 
 st.markdown(f"""
 <style>
+
+{HIDE_STREAMLIT_STYLE}
 
 .stApp {{
     background:
@@ -713,17 +741,6 @@ st.markdown(f"""
     margin-bottom:10px;
 }}
 
-
-header {{
-    visibility: hidden;
-}}
-
-footer {{
-    visibility: hidden;
-}}
-
-
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -762,12 +779,13 @@ IS_ADMIN = (
 if IS_ADMIN:
 
     pages = [
-        "Dashboard",
-        "Add Draw",
-        "History",
-        "Finance",
-        "Reset"
-    ]
+    "Dashboard",
+    "Add Draw",
+    "History",
+    "Finance",
+    "Users",
+    "Reset"
+]
 
 # =====================================================
 # USER NAVIGATION
@@ -1427,7 +1445,81 @@ elif page == "Finance":
             st.success("""
             ✅ All finance data reset successfully.
             """)
+# =====================================================
+# USERS PAGE
+# =====================================================
 
+elif page == "Users":
+
+    if not IS_ADMIN:
+        st.error("Unauthorized Access")
+        st.stop()
+
+    st.title("👥 User Management")
+
+    finance_docs = get_collection_docs(
+        "finance",
+        1000
+    )
+
+    if not finance_docs:
+
+        st.warning("No users found.")
+
+    else:
+
+        users_df = pd.DataFrame(finance_docs)
+
+        if "email" in users_df.columns:
+
+            unique_users = (
+                users_df["email"]
+                .dropna()
+                .unique()
+            )
+
+            st.subheader(
+                f"Total Users: {len(unique_users)}"
+            )
+
+            for user_email in unique_users:
+
+                user_data = users_df[
+                    users_df["email"] == user_email
+                ]
+
+                total_stake = (
+                    user_data["stake"].sum()
+                )
+
+                total_profit = (
+                    user_data["profit"].sum()
+                )
+
+                st.markdown(f"""
+                <div class='ticket-card'>
+
+                <h4>👤 {user_email}</h4>
+
+                <p>
+                💸 Stake:
+                R {total_stake:,.2f}
+                </p>
+
+                <p>
+                💰 Profit:
+                R {total_profit:,.2f}
+                </p>
+
+                </div>
+                """, unsafe_allow_html=True)
+
+            st.subheader("📋 Full User Database")
+
+            st.dataframe(
+                users_df,
+                use_container_width=True
+            )
 # =====================================================
 # RESET
 # =====================================================
