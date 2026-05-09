@@ -38,6 +38,9 @@ import networkx as nx
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.api_core.exceptions import ResourceExhausted
+import random
+from collections import defaultdict
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # =====================================================
 # PAGE CONFIG
@@ -47,6 +50,35 @@ st.set_page_config(
     page_title="Lottery AI PRO FINAL",
     layout="wide"
 )
+
+# =====================================================
+# USER AUTH SYSTEM
+# =====================================================
+
+def get_user_email():
+
+    try:
+        ctx = get_script_run_ctx()
+
+        if ctx and ctx.session_id:
+            return st.experimental_user.email
+
+    except:
+        return None
+
+    return None
+
+USER_EMAIL = get_user_email()
+
+# =====================================================
+# ADMIN CONFIG
+# =====================================================
+
+ADMIN_EMAILS = [
+    "kagishomandzukic@gmail.com"
+]
+
+IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
 
 NUMBERS = list(range(1, 25))
 
@@ -104,7 +136,7 @@ COLLECTIONS = {
 # FIREBASE HELPERS
 # =====================================================
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_collection_docs(name, limit=150):
 
     if db is None:
@@ -176,27 +208,12 @@ def upsert_pair(pair_key):
     try:
 
         ref = db.collection("pairs").document(pair_key)
-        snap = ref.get()
 
-        if snap.exists:
-
-            current = snap.to_dict().get("count", 0)
-
-            ref.update({
-                "pair": pair_key,
-                "count": current + 1,
-                "updated": datetime.now().isoformat()
-            })
-
-        else:
-
-            ref.set({
-                "pair": pair_key,
-                "count": 1,
-                "updated": datetime.now().isoformat()
-            })
-
-        st.cache_data.clear()
+        ref.set({
+            "pair": pair_key,
+            "count": firestore.Increment(1),
+            "updated": datetime.now().isoformat()
+        }, merge=True)
 
     except Exception as e:
         st.error(f"Pair update error: {e}")
@@ -208,48 +225,140 @@ def upsert_pair(pair_key):
 @st.cache_data(show_spinner=False)
 def build_model(draws_data):
 
-    draws = [
-        x["numbers"]
-        for x in draws_data
-        if "numbers" in x
-    ]
+    try:
 
-    if not draws:
-        return [], Counter(), {}, {}, {}
+        cleaned_draws = []
 
-    # frequency engine
-    freq = Counter(
-        n
-        for row in draws
-        for n in row
-    )
+        # =========================================
+        # CLEAN & VALIDATE DRAWS
+        # =========================================
 
-    # recency engine
-    rec = {n: 0 for n in NUMBERS}
+        for row in draws_data:
 
-    for i, row in enumerate(reversed(draws[-100:])):
+            nums = row.get("numbers", [])
 
-        weight = 0.9 ** i
+            # must be list
+            if not isinstance(nums, list):
+                continue
 
-        for n in row:
-            rec[n] += weight
+            cleaned_nums = []
 
-    total = max(len(draws) * 12, 1)
+            for n in nums:
 
-    freq_p = {
-        n: freq[n] / total
-        for n in NUMBERS
-    }
+                try:
 
-    rec_sum = sum(rec.values()) or 1
+                    n = int(n)
 
-    rec_p = {
-        n: rec[n] / rec_sum
-        for n in NUMBERS
-    }
+                    if 1 <= n <= 24:
+                        cleaned_nums.append(n)
 
-    return draws, freq, freq_p, rec, rec_p
+                except:
+                    continue
 
+            # must contain exactly 12 unique numbers
+            if len(cleaned_nums) != 12:
+                continue
+
+            if len(set(cleaned_nums)) != 12:
+                continue
+
+            cleaned_draws.append(cleaned_nums)
+
+        draws = cleaned_draws
+
+        # =========================================
+        # EMPTY SAFETY
+        # =========================================
+
+        if not draws:
+
+            return (
+                [],
+                Counter(),
+                {},
+                {},
+                {}
+            )
+
+        # =========================================
+        # FREQUENCY ENGINE
+        # =========================================
+
+        freq = Counter()
+
+        for row in draws:
+
+            for n in row:
+
+                freq[n] += 1
+
+        # =========================================
+        # RECENCY ENGINE
+        # =========================================
+
+        rec = {
+            n: 0
+            for n in NUMBERS
+        }
+
+        recent_draws = draws[-100:]
+
+        for i, row in enumerate(reversed(recent_draws)):
+
+            weight = 0.9 ** i
+
+            for n in row:
+
+                if n in rec:
+                    rec[n] += weight
+
+        # =========================================
+        # PROBABILITY ENGINE
+        # =========================================
+
+        total = max(
+            len(draws) * 12,
+            1
+        )
+
+        freq_p = {
+            n: freq.get(n, 0) / total
+            for n in NUMBERS
+        }
+
+        rec_sum = sum(rec.values())
+
+        if rec_sum == 0:
+            rec_sum = 1
+
+        rec_p = {
+            n: rec[n] / rec_sum
+            for n in NUMBERS
+        }
+
+        # =========================================
+        # FINAL RETURN
+        # =========================================
+
+        return (
+            draws,
+            freq,
+            freq_p,
+            rec,
+            rec_p
+        )
+
+    except Exception as e:
+
+        st.error(f"build_model() error: {e}")
+
+        return (
+            [],
+            Counter(),
+            {},
+            {},
+            {}
+        )
 # =====================================================
 # BEST PICK OPTIMIZER
 # =====================================================
@@ -302,6 +411,60 @@ def generate_updates(freq, rec):
         msgs.append(f"🚀 Strong signals forming: {overlap}")
 
     return msgs
+
+# =====================================================
+# MARKOV CHAIN MODEL
+# =====================================================
+def build_markov_chain(draws):
+    transitions = defaultdict(Counter)
+
+    for i in range(len(draws) - 1):
+        current_draw = draws[i]
+        next_draw = draws[i + 1]
+
+        for n in current_draw:
+            for nxt in next_draw:
+                transitions[n][nxt] += 1
+
+    return transitions
+
+
+def markov_prediction(transitions):
+    scores = Counter()
+
+    for current_num, next_nums in transitions.items():
+        total = sum(next_nums.values())
+
+        if total == 0:
+            continue
+
+        for nxt, count in next_nums.items():
+            scores[nxt] += count / total
+
+    return scores
+
+# =====================================================
+# MONTE CARLO SIMULATION
+# =====================================================
+def monte_carlo_simulation(final_probs, simulations=5000):
+    simulation_counts = Counter()
+
+    numbers = list(final_probs.keys())
+    weights = np.array(list(final_probs.values()))
+    weights = weights / weights.sum()
+
+    for _ in range(simulations):
+        simulated_draw = np.random.choice(
+            numbers,
+            size=12,
+            replace=False,
+            p=weights
+        )
+
+        for n in simulated_draw:
+            simulation_counts[n] += 1
+
+    return simulation_counts
 
 # =====================================================
 # 24H COMMENTARY CLEANUP
@@ -530,31 +693,67 @@ st.markdown(f"""
     margin-bottom:10px;
 }}
 
+#MainMenu {{
+    visibility: hidden;
+}}
+
+header {{
+    visibility: hidden;
+}}
+
+footer {{
+    visibility: hidden;
+}}
+
+[data-testid="stToolbar"] {{
+    display: none;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
 # =====================================================
-# SIDEBAR
+# ROLE-BASED NAVIGATION
 # =====================================================
 
-page = st.sidebar.radio(
-    "Navigation",
-    [
+if IS_ADMIN:
+
+    pages = [
         "Dashboard",
         "Add Draw",
         "History",
         "Finance",
         "Reset"
     ]
+
+else:
+
+    pages = [
+        "Dashboard",
+        "Finance"
+    ]
+
+page = st.sidebar.radio(
+    "Navigation",
+    pages
 )
 
-advanced_graphs = st.sidebar.toggle("Advanced Graphs")
+advanced_graphs = False
 
+if IS_ADMIN:
+    advanced_graphs = st.sidebar.toggle(
+        "Advanced Graphs"
+    )
+    
 # =====================================================
 # ADD DRAW
 # =====================================================
 
 if page == "Add Draw":
+    
+    if not IS_ADMIN:
+        st.error("Unauthorized Access")
+        st.stop()
 
     st.subheader("➕ Add Draw")
 
@@ -604,14 +803,37 @@ if page == "Add Draw":
 
 elif page == "Dashboard":
 
-    cleanup_old_commentary()
-
     st.title("🎰 Lottery AI PRO Dashboard")
+    
+    if IS_ADMIN:
 
-    draws_data = get_collection_docs("draws", 150)
-    finance_data = get_collection_docs("finance", 200)
+        st.success(f"""
+        👑 ADMIN ACCESS ACTIVE
+        
+        Logged in as:
+        {USER_EMAIL}
+        """)
+
+    else:
+
+        st.info(f"""
+        🔐 Subscriber Access
+        
+        Logged in as:
+        {USER_EMAIL}
+        """)
+
+    draws_data = get_collection_docs("draws", 80)
+    
+    if IS_ADMIN:
+      finance_data = get_collection_docs("finance", 200)
+      
+    else:
+        
+      finance_data = []
+    
     commentary_data = get_collection_docs("commentary", 10)
-    pairs_data = get_collection_docs("pairs", 100)
+    pairs_data = get_collection_docs("pairs", 30)
 
     st.markdown("""
     <div class='ticket-card'>
@@ -629,19 +851,66 @@ elif page == "Dashboard":
 
     draws, freq, freq_p, rec, rec_p = build_model(draws_data)
 
-    # hybrid probability engine
-    final_probs = {
+    # =====================================================
+    # HYBRID PROBABILITY ENGINE
+    # =====================================================
 
-        n: (
-            ((0.6 * freq_p[n] + 0.4 * rec_p[n]) * 0.6)
-            + 0.4 * np.random.rand()
-        )
-
+    # base probability
+    base_probs = {
+        n: ((0.6 * freq_p[n]) + (0.4 * rec_p[n]))
         for n in NUMBERS
     }
 
-    # finance
+    # markov analysis
+    transitions = build_markov_chain(draws)
+    markov_scores = markov_prediction(transitions)
+
+    # combine markov + base
+    combined_probs = {}
+
+    for n in NUMBERS:
+        combined_probs[n] = (
+            (base_probs.get(n, 0) * 0.7)
+            +
+            (markov_scores.get(n, 0) * 0.3)
+        )
+
+    # monte carlo simulation
+    monte_results = monte_carlo_simulation(combined_probs)
+
+    # final probability engine
+    # final probability engine
+    # final probability engine
+    final_probs = {}
+
+    for n in NUMBERS:
+
+        final_probs[n] = (
+            combined_probs.get(n, 0)
+            +
+            (monte_results.get(n, 0) / 100000)
+        )
+
+    # =====================================================
+    # FINANCE ANALYTICS
+    # =====================================================
+
     fin_df = pd.DataFrame(finance_data)
+
+    spent = (
+        fin_df["stake"].sum()
+        if not fin_df.empty else 0
+    )
+
+    profit = (
+        fin_df["profit"].sum()
+        if not fin_df.empty else 0
+    )
+
+    roi = (
+        (profit / spent) * 100
+        if spent else 0
+    )
 
     spent = (
         fin_df["stake"].sum()
@@ -761,6 +1030,24 @@ elif page == "Dashboard":
                 f"<div class='commentary-box'>{msg}</div>",
                 unsafe_allow_html=True
             )
+            
+    with st.expander("🧠 Markov Chain Scores"):
+        st.dataframe(
+            pd.DataFrame({
+                "Number": list(markov_scores.keys()),
+                "Score": list(markov_scores.values())
+            }).sort_values(by="Score", ascending=False),
+            use_container_width=True
+        )
+    
+    with st.expander("🎲 Monte Carlo Results"):
+        st.dataframe(
+            pd.DataFrame({
+                "Number": list(monte_results.keys()),
+                "Simulated Hits": list(monte_results.values())
+            }).sort_values(by="Simulated Hits", ascending=False),
+            use_container_width=True
+        )
 
     # optimizer
     st.subheader("🎯 Best 4–8 Picks Optimizer")
@@ -860,6 +1147,10 @@ elif page == "Dashboard":
 
 elif page == "History":
 
+    if not IS_ADMIN:
+        st.error("Unauthorized Access")
+        st.stop()
+
     st.subheader("📚 History Manager")
 
     df = pd.DataFrame(
@@ -897,9 +1188,17 @@ elif page == "History":
 # FINANCE
 # =====================================================
 
+# =====================================================
+# FINANCE
+# =====================================================
+
 elif page == "Finance":
 
-    st.subheader("💵 Finance Tracker")
+    st.subheader("💵 Personal Finance Tracker")
+
+    # =====================================================
+    # SAVE USER FINANCE DATA
+    # =====================================================
 
     with st.form("finance_form"):
 
@@ -910,36 +1209,169 @@ elif page == "Finance":
 
         profit = st.number_input("Profit")
 
-        submitted = st.form_submit_button("Save")
+        submitted = st.form_submit_button(
+            "Save Finance"
+        )
 
     if submitted:
 
         add_doc("finance", {
+            "email": USER_EMAIL,
             "stake": stake,
             "profit": profit,
             "date": datetime.now().isoformat()
         })
 
-        st.success("✅ Finance saved")
+        st.success("✅ Finance saved successfully")
+
+    # =====================================================
+    # LOAD FINANCE DATA
+    # =====================================================
 
     finance_df = pd.DataFrame(
-        get_collection_docs("finance", 200)
+        get_collection_docs("finance", 500)
     )
 
-    if not finance_df.empty:
+    # =====================================================
+    # USER VIEW
+    # =====================================================
+
+    if not IS_ADMIN:
+
+        finance_df = finance_df[
+            finance_df["email"] == USER_EMAIL
+        ]
+
+    # =====================================================
+    # ADMIN VIEW
+    # =====================================================
+
+    if IS_ADMIN:
+
+        st.success("""
+        👑 ADMIN FINANCE VIEW
+        
+        You can see all user finance records.
+        """)
+
+    else:
+
+        st.info(f"""
+        🔐 Personal Finance Tracker
+        
+        Logged in as:
+        {USER_EMAIL}
+        """)
+
+    # =====================================================
+    # EMPTY STATE
+    # =====================================================
+
+    if finance_df.empty:
+
+        st.warning("""
+        No finance records yet.
+        
+        Add your first finance entry above.
+        """)
+
+    else:
+
+        # =====================================================
+        # ANALYTICS
+        # =====================================================
+
+        spent = finance_df["stake"].sum()
+
+        total_profit = finance_df["profit"].sum()
+
+        roi = (
+            (total_profit / spent) * 100
+            if spent else 0
+        )
+
+        # =====================================================
+        # CARDS
+        # =====================================================
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+
+            st.markdown(f"""
+            <div class='ticket-card'>
+                <h4>💸 Total Stake</h4>
+                <h2>R {spent:,.2f}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with c2:
+
+            color = (
+                "#22c55e"
+                if total_profit >= 0
+                else "#ef4444"
+            )
+
+            st.markdown(f"""
+            <div class='ticket-card'>
+                <h4>💰 Total Profit</h4>
+                <h2 style='color:{color};'>
+                R {total_profit:,.2f}
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with c3:
+
+            roi_color = (
+                "#22c55e"
+                if roi >= 0
+                else "#ef4444"
+            )
+
+            st.markdown(f"""
+            <div class='ticket-card'>
+                <h4>📈 ROI</h4>
+                <h2 style='color:{roi_color};'>
+                {roi:.2f}%
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # =====================================================
+        # FINANCE TABLE
+        # =====================================================
+
+        st.subheader("📋 Finance Records")
+
+        display_columns = [
+            "stake",
+            "profit",
+            "date"
+        ]
+
+        if IS_ADMIN:
+            display_columns.insert(0, "email")
 
         st.dataframe(
-            finance_df,
+            finance_df[display_columns],
             use_container_width=True
         )
 
-    if st.button("🗑️ Reset Finance Data"):
+    # =====================================================
+    # RESET BUTTON
+    # =====================================================
 
-        reset_collection("finance")
+    if IS_ADMIN:
 
-        st.success(
-            "✅ Finance data has been reset"
-        )
+        if st.button("🗑️ Reset Finance Data"):
+
+            reset_collection("finance")
+
+            st.success("""
+            ✅ All finance data reset successfully.
+            """)
 
 # =====================================================
 # RESET
@@ -947,6 +1379,10 @@ elif page == "Finance":
 
 elif page == "Reset":
 
+    if not IS_ADMIN:
+        st.error("Unauthorized Access")
+        st.stop()
+    
     st.title("⚠️ Reset All Firebase Data")
 
     if st.button("🗑️ Reset Everything"):
