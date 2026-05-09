@@ -48,25 +48,41 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 st.set_page_config(
     page_title="Lottery AI PRO FINAL",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # =====================================================
 # USER AUTH SYSTEM
 # =====================================================
 
+# FORCE ADMIN EMAIL
+# CHANGE THIS WHEN NEEDED
+
+FORCE_ADMIN_MODE = True
+
+ADMIN_EMAIL = "kagishomandzukic@gmail.com"
+
 def get_user_email():
 
-    try:
-        ctx = get_script_run_ctx()
+    # =========================================
+    # FORCE ADMIN LOGIN
+    # =========================================
 
-        if ctx and ctx.session_id:
-            return st.experimental_user.email
+    if FORCE_ADMIN_MODE:
+        return ADMIN_EMAIL
+
+    # =========================================
+    # NORMAL STREAMLIT LOGIN
+    # =========================================
+
+    try:
+
+        return st.experimental_user.email
 
     except:
-        return None
 
-    return None
+        return None
 
 USER_EMAIL = get_user_email()
 
@@ -78,7 +94,11 @@ ADMIN_EMAILS = [
     "kagishomandzukic@gmail.com"
 ]
 
-IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
+IS_ADMIN = (
+    USER_EMAIL is not None
+    and USER_EMAIL.lower() in
+    [email.lower() for email in ADMIN_EMAILS]
+)
 
 NUMBERS = list(range(1, 25))
 
@@ -693,9 +713,6 @@ st.markdown(f"""
     margin-bottom:10px;
 }}
 
-#MainMenu {{
-    visibility: hidden;
-}}
 
 header {{
     visibility: hidden;
@@ -705,9 +722,7 @@ footer {{
     visibility: hidden;
 }}
 
-[data-testid="stToolbar"] {{
-    display: none;
-}}
+
 
 </style>
 """, unsafe_allow_html=True)
