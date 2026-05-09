@@ -733,46 +733,33 @@ footer {{
 
 st.sidebar.title("🔐 Access Panel")
 
-# show logged in email
 st.sidebar.info(f"""
 Logged in as:
 
 {USER_EMAIL}
 """)
 
-# ============================================
+# =====================================================
 # ADMIN DETECTION
-# ============================================
+# =====================================================
 
 ADMIN_EMAILS = [
     "kagishomandzukic@gmail.com"
 ]
 
-IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
+IS_ADMIN = (
+    USER_EMAIL is not None
+    and USER_EMAIL in [
+        email.lower().strip()
+        for email in ADMIN_EMAILS
+    ]
+)
 
-# ============================================
-# MODE SWITCH
-# ============================================
+# =====================================================
+# ADMIN NAVIGATION
+# =====================================================
 
 if IS_ADMIN:
-
-    access_mode = st.sidebar.selectbox(
-        "Select Access Mode",
-        [
-            "👑 Admin Mode",
-            "👤 User Mode"
-        ]
-    )
-
-else:
-
-    access_mode = "👤 User Mode"
-
-# ============================================
-# ADMIN NAVIGATION
-# ============================================
-
-if access_mode == "👑 Admin Mode":
 
     pages = [
         "Dashboard",
@@ -782,9 +769,9 @@ if access_mode == "👑 Admin Mode":
         "Reset"
     ]
 
-# ============================================
+# =====================================================
 # USER NAVIGATION
-# ============================================
+# =====================================================
 
 else:
 
@@ -793,22 +780,22 @@ else:
         "Finance"
     ]
 
-# ============================================
-# PAGE SELECTOR
-# ============================================
+# =====================================================
+# PAGE SWITCHER
+# =====================================================
 
 page = st.sidebar.radio(
     "📂 Navigation",
     pages
 )
 
-# ============================================
+# =====================================================
 # ADVANCED GRAPHS
-# ============================================
+# =====================================================
 
 advanced_graphs = False
 
-if IS_ADMIN and access_mode == "👑 Admin Mode":
+if IS_ADMIN:
 
     advanced_graphs = st.sidebar.toggle(
         "Advanced Graphs"
