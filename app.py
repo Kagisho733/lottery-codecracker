@@ -713,10 +713,51 @@ footer {{
 """, unsafe_allow_html=True)
 
 # =====================================================
-# ROLE-BASED NAVIGATION
+# ADMIN / USER MODE SWITCHER
 # =====================================================
 
+st.sidebar.title("🔐 Access Panel")
+
+# show logged in email
+st.sidebar.info(f"""
+Logged in as:
+
+{USER_EMAIL}
+""")
+
+# ============================================
+# ADMIN DETECTION
+# ============================================
+
+ADMIN_EMAILS = [
+    "kagishomandzukic@gmail.com"
+]
+
+IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
+
+# ============================================
+# MODE SWITCH
+# ============================================
+
 if IS_ADMIN:
+
+    access_mode = st.sidebar.selectbox(
+        "Select Access Mode",
+        [
+            "👑 Admin Mode",
+            "👤 User Mode"
+        ]
+    )
+
+else:
+
+    access_mode = "👤 User Mode"
+
+# ============================================
+# ADMIN NAVIGATION
+# ============================================
+
+if access_mode == "👑 Admin Mode":
 
     pages = [
         "Dashboard",
@@ -726,6 +767,10 @@ if IS_ADMIN:
         "Reset"
     ]
 
+# ============================================
+# USER NAVIGATION
+# ============================================
+
 else:
 
     pages = [
@@ -733,18 +778,26 @@ else:
         "Finance"
     ]
 
+# ============================================
+# PAGE SELECTOR
+# ============================================
+
 page = st.sidebar.radio(
-    "Navigation",
+    "📂 Navigation",
     pages
 )
 
+# ============================================
+# ADVANCED GRAPHS
+# ============================================
+
 advanced_graphs = False
 
-if IS_ADMIN:
+if IS_ADMIN and access_mode == "👑 Admin Mode":
+
     advanced_graphs = st.sidebar.toggle(
         "Advanced Graphs"
     )
-    
 # =====================================================
 # ADD DRAW
 # =====================================================
