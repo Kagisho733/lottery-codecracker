@@ -745,10 +745,10 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =====================================================
-# ADMIN / USER MODE SWITCHER
+# ROLE-BASED ACCESS CONTROL
 # =====================================================
 
-st.sidebar.title("🔐 Access Panel")
+st.sidebar.title("🎰 Lottery AI PRO")
 
 st.sidebar.info(f"""
 Logged in as:
@@ -757,7 +757,7 @@ Logged in as:
 """)
 
 # =====================================================
-# ADMIN DETECTION
+# ADMIN EMAILS
 # =====================================================
 
 ADMIN_EMAILS = [
@@ -766,7 +766,7 @@ ADMIN_EMAILS = [
 
 IS_ADMIN = (
     USER_EMAIL is not None
-    and USER_EMAIL in [
+    and USER_EMAIL.lower().strip() in [
         email.lower().strip()
         for email in ADMIN_EMAILS
     ]
@@ -778,46 +778,47 @@ IS_ADMIN = (
 
 if IS_ADMIN:
 
-    pages = [
-    "Dashboard",
-    "Add Draw",
-    "History",
-    "Finance",
-    "Users",
-    "Reset"
-]
-
-# =====================================================
-# USER NAVIGATION
-# =====================================================
-
-else:
+    st.sidebar.success("👑 ADMIN MODE")
 
     pages = [
         "Dashboard",
-        "Finance"
+        "Add Draw",
+        "History",
+        "Finance",
+        "Users",
+        "Reset"
     ]
 
-# =====================================================
-# PAGE SWITCHER
-# =====================================================
-
-page = st.sidebar.radio(
-    "📂 Navigation",
-    pages
-)
-
-# =====================================================
-# ADVANCED GRAPHS
-# =====================================================
-
-advanced_graphs = False
-
-if IS_ADMIN:
+    page = st.sidebar.radio(
+        "📂 Navigation",
+        pages
+    )
 
     advanced_graphs = st.sidebar.toggle(
         "Advanced Graphs"
     )
+
+# =====================================================
+# USER ACCESS
+# =====================================================
+
+else:
+
+    st.sidebar.success("✅ USER ACCESS")
+
+    # USERS CANNOT NAVIGATE
+    # USERS ONLY SEE DASHBOARD
+
+    page = "Dashboard"
+
+    advanced_graphs = False
+
+    st.sidebar.warning("""
+    Subscriber mode active.
+
+    Access restricted to
+    prediction dashboard only.
+    """)
 # =====================================================
 # ADD DRAW
 # =====================================================
@@ -1259,7 +1260,7 @@ elif page == "History":
 
 # =====================================================
 # FINANCE
-# =====================================================
+# =====================================================  
 
 # =====================================================
 # FINANCE
