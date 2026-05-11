@@ -745,25 +745,19 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =====================================================
-# ROLE-BASED ACCESS CONTROL
+# SECURE ROLE-BASED ACCESS SYSTEM
 # =====================================================
 
-st.sidebar.title("🎰 Lottery AI PRO")
-
-st.sidebar.info(f"""
-Logged in as:
-
-{USER_EMAIL}
-""")
-
-# =====================================================
+# -----------------------------
 # ADMIN EMAILS
-# =====================================================
-
+# -----------------------------
 ADMIN_EMAILS = [
     "kagishomandzukic@gmail.com"
 ]
 
+# -----------------------------
+# DETECT ADMIN
+# -----------------------------
 IS_ADMIN = (
     USER_EMAIL is not None
     and USER_EMAIL.lower().strip() in [
@@ -773,24 +767,47 @@ IS_ADMIN = (
 )
 
 # =====================================================
-# ADMIN NAVIGATION
+# ADMIN SIDEBAR
 # =====================================================
 
 if IS_ADMIN:
 
-    st.sidebar.success("👑 ADMIN MODE")
+    # SHOW NORMAL STREAMLIT MENU FOR ADMIN
+    st.markdown("""
+    <style>
 
+    #MainMenu {
+        visibility: visible !important;
+    }
+
+    header {
+        visibility: visible !important;
+    }
+
+    [data-testid="stToolbar"] {
+        display: block !important;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.success(f"""
+    👑 ADMIN ACCESS
+
+    {USER_EMAIL}
+    """)
+
+    # ADMIN NAVIGATION
     pages = [
         "Dashboard",
         "Add Draw",
         "History",
         "Finance",
-        "Users",
         "Reset"
     ]
 
     page = st.sidebar.radio(
-        "📂 Navigation",
+        "📂 Admin Navigation",
         pages
     )
 
@@ -799,26 +816,44 @@ if IS_ADMIN:
     )
 
 # =====================================================
-# USER ACCESS
+# SUBSCRIBER / INVITED USER MODE
 # =====================================================
 
 else:
 
-    st.sidebar.success("✅ USER ACCESS")
+    # HIDE STREAMLIT MENU FOR USERS
+    st.markdown("""
+    <style>
 
-    # USERS CANNOT NAVIGATE
-    # USERS ONLY SEE DASHBOARD
+    #MainMenu {
+        visibility: hidden !important;
+    }
 
+    header {
+        visibility: hidden !important;
+    }
+
+    footer {
+        visibility: hidden !important;
+    }
+
+    [data-testid="stToolbar"] {
+        display: none !important;
+    }
+
+    /* HIDE SIDEBAR COMPLETELY */
+    section[data-testid="stSidebar"] {
+        display: none !important;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
+    # FORCE USERS TO DASHBOARD ONLY
     page = "Dashboard"
 
     advanced_graphs = False
-
-    st.sidebar.warning("""
-    Subscriber mode active.
-
-    Access restricted to
-    prediction dashboard only.
-    """)
+    
 # =====================================================
 # ADD DRAW
 # =====================================================
@@ -891,11 +926,17 @@ elif page == "Dashboard":
     else:
 
         st.info(f"""
-        🔐 Subscriber Access
+        🔐 Subscriber Dashboard
         
         Logged in as:
         {USER_EMAIL}
         """)
+
+    st.success("""
+    ✅ Connected Successfully
+
+    Reload numbers anytime to view latest draws.
+    """)
 
     draws_data = get_collection_docs("draws", 80)
     
