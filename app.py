@@ -52,55 +52,105 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+
 # =====================================================
-# USER AUTH SYSTEM
+# REAL USER AUTH SYSTEM
 # =====================================================
-
-# FORCE ADMIN EMAIL
-# CHANGE THIS WHEN NEEDED
-
-FORCE_ADMIN_MODE = True
-
-ADMIN_EMAIL = "kagishomandzukic@gmail.com"
 
 def get_user_email():
 
-    # =========================================
-    # FORCE ADMIN LOGIN
-    # =========================================
-
-    if FORCE_ADMIN_MODE:
-        return ADMIN_EMAIL
-
-    # =========================================
-    # NORMAL STREAMLIT LOGIN
-    # =========================================
-
     try:
 
-        return st.experimental_user.email
+        user = st.experimental_user
+
+        if user and user.email:
+            return user.email.lower().strip()
 
     except:
+        pass
 
-        return None
+    return None
 
 USER_EMAIL = get_user_email()
 
 # =====================================================
-# ADMIN CONFIG
+# ADMIN WHITELIST
 # =====================================================
 
 ADMIN_EMAILS = [
     "kagishomandzukic@gmail.com"
 ]
 
-IS_ADMIN = (
-    USER_EMAIL is not None
-    and USER_EMAIL.lower() in
-    [email.lower() for email in ADMIN_EMAILS]
-)
+# =====================================================
+# APPROVED USER CHECK
+# =====================================================
+
+def get_approved_users():
+
+    try:
+
+        docs = db.collection(
+            "approved_users"
+        ).stream()
+
+        approved = []
+
+        for doc in docs:
+
+            data = doc.to_dict()
+
+            email = (
+                data.get("email", "")
+                .lower()
+                .strip()
+            )
+
+            if email:
+                approved.append(email)
+
+        return approved
+
+    except Exception as e:
+
+        st.error(
+            f"Approved users error: {e}"
+        )
+
+        return []
+
+APPROVED_USERS = get_approved_users()
+
+
+# =====================================================
+# ROLE DETECTION
+# =====================================================
+
+IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
+
+IS_APPROVED_USER = USER_EMAIL in APPROVED_USERS
 
 NUMBERS = list(range(1, 25))
+
+# =====================================================
+# HARD ACCESS CONTROL
+# =====================================================
+
+if USER_EMAIL is None:
+
+    st.error("Please login first.")
+    st.stop()
+
+# BLOCK NON-APPROVED USERS
+if not IS_ADMIN and not IS_APPROVED_USER:
+
+    st.error("""
+    Access denied.
+
+    Your email is not approved.
+    """)
+
+    st.stop()
 
 # =====================================================
 # IMAGE LOADER
@@ -758,12 +808,21 @@ ADMIN_EMAILS = [
 # -----------------------------
 # DETECT ADMIN
 # -----------------------------
+# =====================================================
+# ROLE DETECTION
+# =====================================================
+
 IS_ADMIN = (
     USER_EMAIL is not None
     and USER_EMAIL.lower().strip() in [
         email.lower().strip()
         for email in ADMIN_EMAILS
     ]
+)
+
+IS_APPROVED_USER = (
+    USER_EMAIL is not None
+    and USER_EMAIL.lower().strip() in APPROVED_USERS
 )
 
 # =====================================================
@@ -798,12 +857,14 @@ if IS_ADMIN:
     """)
 
     # ADMIN NAVIGATION
+    # ADMIN NAVIGATION
     pages = [
-        "Dashboard",
-        "Add Draw",
-        "History",
-        "Finance",
-        "Reset"
+    "Dashboard",
+    "Add Draw",
+    "History",
+    "Finance",
+    "Users",
+    "Reset"
     ]
 
     page = st.sidebar.radio(
@@ -821,7 +882,6 @@ if IS_ADMIN:
 
 else:
 
-    # HIDE STREAMLIT MENU FOR USERS
     st.markdown("""
     <style>
 
@@ -841,7 +901,6 @@ else:
         display: none !important;
     }
 
-    /* HIDE SIDEBAR COMPLETELY */
     section[data-testid="stSidebar"] {
         display: none !important;
     }
@@ -849,7 +908,7 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
-    # FORCE USERS TO DASHBOARD ONLY
+    # USERS CAN ONLY SEE DASHBOARD
     page = "Dashboard"
 
     advanced_graphs = False
@@ -1494,74 +1553,113 @@ elif page == "Finance":
 elif page == "Users":
 
     if not IS_ADMIN:
-        st.error("Unauthorized Access")
         st.stop()
 
-    st.title("👥 User Management")
+    st.title("👥 Approved Users")
 
-    finance_docs = get_collection_docs(
-        "finance",
-        1000
-    )
+    # =========================================
+    # ADD USER
+    # =========================================
 
-    if not finance_docs:
+    with st.form("add_user_form"):
 
-        st.warning("No users found.")
+        new_email = st.text_input(
+            "User Gmail"
+        )
+
+        submitted = st.form_submit_button(
+            "Approve User"
+        )
+
+    if submitted:
+
+        email = (
+            new_email
+            .lower()
+            .strip()
+        )
+
+        if email:
+
+            db.collection(
+                "approved_users"
+            ).add({
+                "email": email,
+                "approved_at":
+                datetime.now().isoformat()
+            })
+
+            st.success(
+                f"{email} approved successfully"
+            )
+
+            st.rerun()
+
+    # =========================================
+    # SHOW USERS
+    # =========================================
+
+    docs = db.collection(
+        "approved_users"
+    ).stream()
+
+    users = []
+
+    for doc in docs:
+
+        data = doc.to_dict()
+
+        users.append({
+            "id": doc.id,
+            "email": data.get("email"),
+            "approved_at":
+            data.get("approved_at")
+        })
+
+    if users:
+
+        users_df = pd.DataFrame(users)
+
+        st.dataframe(
+            users_df,
+            use_container_width=True
+        )
+
+        # =====================================
+        # REMOVE USER
+        # =====================================
+
+        remove_email = st.selectbox(
+            "Remove User",
+            users_df["email"]
+        )
+
+        if st.button("❌ Remove Access"):
+
+            target = users_df[
+                users_df["email"]
+                == remove_email
+            ]
+
+            if not target.empty:
+
+                doc_id = target.iloc[0]["id"]
+
+                db.collection(
+                    "approved_users"
+                ).document(doc_id).delete()
+
+                st.success(
+                    "User removed"
+                )
+
+                st.rerun()
 
     else:
 
-        users_df = pd.DataFrame(finance_docs)
-
-        if "email" in users_df.columns:
-
-            unique_users = (
-                users_df["email"]
-                .dropna()
-                .unique()
-            )
-
-            st.subheader(
-                f"Total Users: {len(unique_users)}"
-            )
-
-            for user_email in unique_users:
-
-                user_data = users_df[
-                    users_df["email"] == user_email
-                ]
-
-                total_stake = (
-                    user_data["stake"].sum()
-                )
-
-                total_profit = (
-                    user_data["profit"].sum()
-                )
-
-                st.markdown(f"""
-                <div class='ticket-card'>
-
-                <h4>👤 {user_email}</h4>
-
-                <p>
-                💸 Stake:
-                R {total_stake:,.2f}
-                </p>
-
-                <p>
-                💰 Profit:
-                R {total_profit:,.2f}
-                </p>
-
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.subheader("📋 Full User Database")
-
-            st.dataframe(
-                users_df,
-                use_container_width=True
-            )
+        st.info(
+            "No approved users yet."
+        )
 # =====================================================
 # RESET
 # =====================================================
