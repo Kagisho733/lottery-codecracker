@@ -190,29 +190,46 @@ NUMBERS = list(range(1, 25))
 # ACCESS CONTROL
 # =====================================================
 
+
 if USER_EMAIL is None:
 
     st.error("""
     Please login first.
-    
-    Open this app using your invitation link
+
+    Open the app using your invitation link
     and sign in with Google.
     """)
 
     st.stop()
 
-if not IS_ADMIN and not IS_APPROVED_USER:
+# =====================================================
+# ADMIN ALWAYS BYPASSES APPROVED USERS
+# =====================================================
+
+if IS_ADMIN:
+
+    st.success(f"""
+    👑 ADMIN ACCESS ACTIVE
+
+    Logged in as:
+    {USER_EMAIL}
+    """)
+
+# =====================================================
+# NORMAL INVITED USERS
+# =====================================================
+
+elif USER_EMAIL not in APPROVED_USERS:
 
     st.error(f"""
     Access denied.
 
     Your Gmail is not approved:
-    
+
     {USER_EMAIL}
     """)
 
     st.stop()
-
 # =====================================================
 # IMAGE LOADER
 # =====================================================
@@ -880,7 +897,10 @@ IS_ADMIN = (
 
 IS_APPROVED_USER = (
     USER_EMAIL is not None
-    and USER_EMAIL.lower().strip() in APPROVED_USERS
+    and (
+        USER_EMAIL in APPROVED_USERS
+        or USER_EMAIL in ADMIN_EMAILS
+    )
 )
 
 # =====================================================
