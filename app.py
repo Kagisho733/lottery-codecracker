@@ -89,14 +89,15 @@ def init_firebase():
 db = init_firebase()
 
 # =====================================================
-# REAL USER AUTH SYSTEM
+# AUTHENTICATION SYSTEM
 # =====================================================
 
 def get_user_email():
 
     try:
 
-        user = st.experimental_user
+        # Streamlit authenticated user
+        user = st.user
 
         if user and user.email:
 
@@ -181,8 +182,41 @@ IS_ADMIN = (
 
 IS_APPROVED_USER = (
     USER_EMAIL is not None
-    and USER_EMAIL in APPROVED_USERS
+    and (
+        USER_EMAIL in APPROVED_USERS
+        or IS_ADMIN
+    )
 )
+
+# =====================================================
+# ACCESS CONTROL
+# =====================================================
+
+if USER_EMAIL is None:
+
+    st.error("""
+    Please sign in with Google first.
+    """)
+
+    st.stop()
+
+# Admin always bypasses everything
+if IS_ADMIN:
+
+    pass
+
+# Normal invited users
+elif not IS_APPROVED_USER:
+
+    st.error(f"""
+    Access denied.
+
+    Your Gmail is not approved:
+
+    {USER_EMAIL}
+    """)
+
+    st.stop()
 
 NUMBERS = list(range(1, 25))
 
@@ -873,35 +907,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# -----------------------------
-# ADMIN EMAILS
-# -----------------------------
-ADMIN_EMAILS = [
-    "kagishomandzukic@gmail.com"
-]
-
-# -----------------------------
-# DETECT ADMIN
-# -----------------------------
-# =====================================================
-# ROLE DETECTION
-# =====================================================
-
-IS_ADMIN = (
-    USER_EMAIL is not None
-    and USER_EMAIL.lower().strip() in [
-        email.lower().strip()
-        for email in ADMIN_EMAILS
-    ]
-)
-
-IS_APPROVED_USER = (
-    USER_EMAIL is not None
-    and (
-        USER_EMAIL in APPROVED_USERS
-        or USER_EMAIL in ADMIN_EMAILS
-    )
-)
 
 # =====================================================
 # ADMIN SIDEBAR
@@ -934,7 +939,7 @@ if IS_ADMIN:
     {USER_EMAIL}
     """)
 
-    # ADMIN NAVIGATION
+  
     # ADMIN NAVIGATION
     pages = [
     "Dashboard",
