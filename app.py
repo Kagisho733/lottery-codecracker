@@ -1,46 +1,50 @@
 # =====================================================
-# LOTTERY AI PRO FINAL v23.0
+# LOTTERY AI PRO FINAL v24.0
 # =====================================================
-# PURPOSE:
-# - Firebase-powered lottery analytics dashboard
-# - Smart lottery prediction engine
-# - Finance tracking system
-# - Live commentary updates
-# - Monte Carlo weighted ticket generation
-# - Pair relationship analytics
-# - Trend detection system
-# - Heatmaps + advanced graph analytics
-# - Optimized Firebase quota usage
-# - 24H commentary auto cleanup
+# FULL ADMIN VERSION
 #
-# MAIN FEATURES:
-# 1. Dashboard
-# 2. Add Draw
-# 3. History Manager
-# 4. Finance Tracker
-# 5. Reset System
-# 6. Smart Ticket Sections
-# 7. Best 4–8 Optimizer
-# 8. Pair Relationship Engine
-# 9. Trend Momentum Analytics
-# 10. Monte Carlo Probability Engine
+# FEATURES:
+# - Firebase Lottery Dashboard
+# - Draw Management
+# - Finance Tracking
+# - Markov Chain Analytics
+# - Monte Carlo Simulations
+# - Smart Ticket Generator
+# - Pair Relationship Engine
+# - Heatmaps
+# - Trend Detection
+# - Advanced Graph Analytics
+# - Auto Commentary System
+# - Reset Tools
+#
+# ADMIN ONLY VERSION
+# - All user authentication removed
+# - All approval systems removed
+# - Full unrestricted admin access
+#
+# =====================================================
+
+# =====================================================
+# IMPORTS
 # =====================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import base64
+import random
+
 from datetime import datetime, timedelta
-from collections import Counter
+from collections import Counter, defaultdict
+
 import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
+
 import firebase_admin
+
 from firebase_admin import credentials, firestore
 from google.api_core.exceptions import ResourceExhausted
-import random
-from collections import defaultdict
-from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # =====================================================
 # PAGE CONFIG
@@ -52,259 +56,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
 # =====================================================
-# FIREBASE INIT
+# CONSTANTS
 # =====================================================
-
-@st.cache_resource
-def init_firebase():
-
-    try:
-
-        if firebase_admin._apps:
-            return firestore.client()
-
-        config = dict(st.secrets["FIREBASE"])
-
-        config["private_key"] = (
-            config["private_key"]
-            .replace("\\n", "\n")
-            .strip()
-        )
-
-        cred = credentials.Certificate(config)
-
-        firebase_admin.initialize_app(cred)
-
-        return firestore.client()
-
-    except Exception as e:
-
-        st.error(f"🔥 Firebase auth failed: {e}")
-
-        return None
-
-
-db = init_firebase()
-
-# =====================================================
-# AUTHENTICATION SYSTEM
-# =====================================================
-
-def get_user_email():
-
-    try:
-
-        # Streamlit authenticated user
-        user = st.user
-
-        if user and user.email:
-
-            return (
-                user.email
-                .lower()
-                .strip()
-            )
-
-    except Exception:
-        pass
-
-    return None
-
-
-USER_EMAIL = get_user_email()
-
-# =====================================================
-# ADMIN EMAILS
-# =====================================================
-
-ADMIN_EMAILS = [
-    "kagishomandzukic@gmail.com"
-]
-
-# =====================================================
-# LOAD APPROVED USERS
-# =====================================================
-
-@st.cache_data(ttl=300)
-def get_approved_users():
-
-    if db is None:
-        return []
-
-    try:
-
-        docs = (
-            db.collection("approved_users")
-            .stream()
-        )
-
-        approved = []
-
-        for doc in docs:
-
-            data = doc.to_dict()
-
-            email = (
-                data.get("email", "")
-                .lower()
-                .strip()
-            )
-
-            if email:
-                approved.append(email)
-
-        return approved
-
-    except Exception as e:
-
-        st.error(
-            f"Approved users error: {e}"
-        )
-
-        return []
-
-
-APPROVED_USERS = get_approved_users()
-
-# =====================================================
-# ROLE DETECTION
-# =====================================================
-
-IS_ADMIN = (
-    USER_EMAIL is not None
-    and USER_EMAIL in [
-        email.lower().strip()
-        for email in ADMIN_EMAILS
-    ]
-)
-
-IS_APPROVED_USER = (
-    USER_EMAIL is not None
-    and (
-        USER_EMAIL in APPROVED_USERS
-        or IS_ADMIN
-    )
-)
-
-# =====================================================
-# ACCESS CONTROL
-# =====================================================
-
-if USER_EMAIL is None:
-
-    st.error("""
-    Please sign in with Google first.
-    """)
-
-    st.stop()
-
-# Admin always bypasses everything
-if IS_ADMIN:
-
-    pass
-
-# Normal invited users
-elif not IS_APPROVED_USER:
-
-    st.error(f"""
-    Access denied.
-
-    Your Gmail is not approved:
-
-    {USER_EMAIL}
-    """)
-
-    st.stop()
 
 NUMBERS = list(range(1, 25))
-
-# =====================================================
-# ACCESS CONTROL
-# =====================================================
-
-
-if USER_EMAIL is None:
-
-    st.error("""
-    Please login first.
-
-    Open the app using your invitation link
-    and sign in with Google.
-    """)
-
-    st.stop()
-
-# =====================================================
-# ADMIN ALWAYS BYPASSES APPROVED USERS
-# =====================================================
-
-if IS_ADMIN:
-
-    st.success(f"""
-    👑 ADMIN ACCESS ACTIVE
-
-    Logged in as:
-    {USER_EMAIL}
-    """)
-
-# =====================================================
-# NORMAL INVITED USERS
-# =====================================================
-
-elif USER_EMAIL not in APPROVED_USERS:
-
-    st.error(f"""
-    Access denied.
-
-    Your Gmail is not approved:
-
-    {USER_EMAIL}
-    """)
-
-    st.stop()
-# =====================================================
-# IMAGE LOADER
-# =====================================================
-
-def get_base64(file_path):
-    with open(file_path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
-
-dashboard_bg = get_base64("assets/dashboard_bg.jpg.webp")
-sidebar_bg = get_base64("assets/sidebar_bg.jpg.webp")
-
-# =====================================================
-# FIREBASE INIT
-# =====================================================
-
-@st.cache_resource
-def init_firebase():
-    try:
-
-        if firebase_admin._apps:
-            return firestore.client()
-
-        config = dict(st.secrets["FIREBASE"])
-
-        config["private_key"] = (
-            config["private_key"]
-            .replace("\\n", "\n")
-            .strip()
-        )
-
-        cred = credentials.Certificate(config)
-
-        firebase_admin.initialize_app(cred)
-
-        return firestore.client()
-
-    except Exception as e:
-        st.error(f"🔥 Firebase auth failed: {e}")
-        return None
-
-db = init_firebase()
 
 COLLECTIONS = {
     "draws": "draws",
@@ -315,11 +71,171 @@ COLLECTIONS = {
 }
 
 # =====================================================
+# FIREBASE INITIALIZATION
+# =====================================================
+
+@st.cache_resource
+def init_firebase():
+
+    try:
+
+        if firebase_admin._apps:
+            return firestore.client()
+
+        config = dict(st.secrets["FIREBASE"])
+
+        config["private_key"] = (
+            config["private_key"]
+            .replace("\\n", "\n")
+            .strip()
+        )
+
+        cred = credentials.Certificate(config)
+
+        firebase_admin.initialize_app(cred)
+
+        return firestore.client()
+
+    except Exception as e:
+
+        st.error(f"🔥 Firebase Initialization Failed: {e}")
+
+        return None
+
+
+db = init_firebase()
+
+# =====================================================
+# IMAGE LOADER
+# =====================================================
+
+def get_base64(file_path):
+
+    try:
+
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+
+    except:
+        return ""
+
+
+dashboard_bg = get_base64("assets/dashboard_bg.jpg.webp")
+sidebar_bg = get_base64("assets/sidebar_bg.jpg.webp")
+
+# =====================================================
+# GLOBAL STYLING
+# =====================================================
+
+st.markdown(f"""
+<style>
+
+#MainMenu {{
+    visibility: hidden;
+}}
+
+footer {{
+    visibility: hidden;
+}}
+
+header {{
+    visibility: hidden;
+}}
+
+[data-testid="stToolbar"] {{
+    display:none;
+}}
+
+.stApp {{
+    background:
+        linear-gradient(rgba(5,10,30,.88),
+        rgba(5,10,30,.95)),
+        url("data:image/webp;base64,{dashboard_bg}");
+
+    background-size: cover;
+    background-attachment: fixed;
+    color:white;
+}}
+
+[data-testid="stSidebar"] {{
+    background:
+        linear-gradient(rgba(10,20,60,.88),
+        rgba(5,10,30,.95)),
+        url("data:image/webp;base64,{sidebar_bg}");
+
+    background-size: cover;
+}}
+
+.ticket-card {{
+
+    background: rgba(15,23,42,.72);
+
+    border-top: 4px solid #fbbf24;
+
+    border-radius: 24px;
+
+    padding: 20px;
+
+    margin-bottom: 18px;
+
+    box-shadow: 0 0 30px rgba(251,191,36,.25);
+}}
+
+.ball {{
+
+    background:
+        radial-gradient(circle at 30% 30%,
+        #fbbf24,
+        #ef4444);
+
+    width: 52px;
+
+    height: 52px;
+
+    border-radius: 50%;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:center;
+
+    font-weight:900;
+
+    color:white;
+}}
+
+.number-grid {{
+
+    display:flex;
+
+    flex-wrap:wrap;
+
+    gap:10px;
+}}
+
+.commentary-box {{
+
+    background: rgba(30,41,59,.75);
+
+    border-left:4px solid #22c55e;
+
+    border-radius:14px;
+
+    padding:12px;
+
+    margin-bottom:10px;
+}}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================
 # FIREBASE HELPERS
 # =====================================================
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_collection_docs(name, limit=150):
+def get_collection_docs(name, limit=200):
 
     if db is None:
         return []
@@ -338,30 +254,43 @@ def get_collection_docs(name, limit=150):
         ]
 
     except ResourceExhausted:
-        st.warning("⚠️ Firebase daily quota exceeded.")
+
+        st.warning("⚠️ Firebase Daily Quota Exceeded")
+
         return []
 
     except Exception as e:
-        st.error(f"Firebase read error: {e}")
+
+        st.error(f"Firebase Read Error: {e}")
+
         return []
+
 
 def add_doc(name, data):
 
     try:
+
         db.collection(COLLECTIONS[name]).add(data)
+
         st.cache_data.clear()
 
     except Exception as e:
-        st.error(f"Add document error: {e}")
+
+        st.error(f"Add Document Error: {e}")
+
 
 def delete_doc(name, doc_id):
 
     try:
+
         db.collection(COLLECTIONS[name]).document(doc_id).delete()
+
         st.cache_data.clear()
 
     except Exception as e:
-        st.error(f"Delete error: {e}")
+
+        st.error(f"Delete Error: {e}")
+
 
 def reset_collection(name):
 
@@ -379,10 +308,11 @@ def reset_collection(name):
         st.cache_data.clear()
 
     except Exception as e:
-        st.error(f"Reset error: {e}")
+
+        st.error(f"Reset Error: {e}")
 
 # =====================================================
-# OPTIMIZED PAIRS ENGINE
+# PAIR ENGINE
 # =====================================================
 
 def upsert_pair(pair_key):
@@ -398,151 +328,159 @@ def upsert_pair(pair_key):
         }, merge=True)
 
     except Exception as e:
-        st.error(f"Pair update error: {e}")
+
+        st.error(f"Pair Update Error: {e}")
 
 # =====================================================
-# ANALYTICS ENGINE
+# ANALYTICS MODEL
 # =====================================================
 
 @st.cache_data(show_spinner=False)
 def build_model(draws_data):
 
-    try:
+    cleaned_draws = []
 
-        cleaned_draws = []
+    for row in draws_data:
 
-        # =========================================
-        # CLEAN & VALIDATE DRAWS
-        # =========================================
+        nums = row.get("numbers", [])
 
-        for row in draws_data:
+        if not isinstance(nums, list):
+            continue
 
-            nums = row.get("numbers", [])
+        try:
 
-            # must be list
-            if not isinstance(nums, list):
-                continue
+            nums = sorted(list(set([
+                int(n)
+                for n in nums
+                if 1 <= int(n) <= 24
+            ])))
 
-            cleaned_nums = []
+        except:
+            continue
 
-            for n in nums:
+        if len(nums) != 12:
+            continue
 
-                try:
+        cleaned_draws.append(nums)
 
-                    n = int(n)
+    draws = cleaned_draws
 
-                    if 1 <= n <= 24:
-                        cleaned_nums.append(n)
+    if not draws:
 
-                except:
-                    continue
+        return [], Counter(), {}, {}, {}
 
-            # must contain exactly 12 unique numbers
-            if len(cleaned_nums) != 12:
-                continue
+    # =========================================
+    # FREQUENCY
+    # =========================================
 
-            if len(set(cleaned_nums)) != 12:
-                continue
+    freq = Counter()
 
-            cleaned_draws.append(cleaned_nums)
+    for row in draws:
+        for n in row:
+            freq[n] += 1
 
-        draws = cleaned_draws
+    # =========================================
+    # RECENCY
+    # =========================================
 
-        # =========================================
-        # EMPTY SAFETY
-        # =========================================
+    rec = {n: 0 for n in NUMBERS}
 
-        if not draws:
+    recent_draws = draws[-100:]
 
-            return (
-                [],
-                Counter(),
-                {},
-                {},
-                {}
-            )
+    for i, row in enumerate(reversed(recent_draws)):
 
-        # =========================================
-        # FREQUENCY ENGINE
-        # =========================================
+        weight = 0.9 ** i
 
-        freq = Counter()
+        for n in row:
+            rec[n] += weight
 
-        for row in draws:
+    # =========================================
+    # PROBABILITIES
+    # =========================================
 
-            for n in row:
+    total = max(len(draws) * 12, 1)
 
-                freq[n] += 1
+    freq_p = {
+        n: freq.get(n, 0) / total
+        for n in NUMBERS
+    }
 
-        # =========================================
-        # RECENCY ENGINE
-        # =========================================
+    rec_sum = sum(rec.values()) or 1
 
-        rec = {
-            n: 0
-            for n in NUMBERS
-        }
+    rec_p = {
+        n: rec[n] / rec_sum
+        for n in NUMBERS
+    }
 
-        recent_draws = draws[-100:]
+    return draws, freq, freq_p, rec, rec_p
 
-        for i, row in enumerate(reversed(recent_draws)):
-
-            weight = 0.9 ** i
-
-            for n in row:
-
-                if n in rec:
-                    rec[n] += weight
-
-        # =========================================
-        # PROBABILITY ENGINE
-        # =========================================
-
-        total = max(
-            len(draws) * 12,
-            1
-        )
-
-        freq_p = {
-            n: freq.get(n, 0) / total
-            for n in NUMBERS
-        }
-
-        rec_sum = sum(rec.values())
-
-        if rec_sum == 0:
-            rec_sum = 1
-
-        rec_p = {
-            n: rec[n] / rec_sum
-            for n in NUMBERS
-        }
-
-        # =========================================
-        # FINAL RETURN
-        # =========================================
-
-        return (
-            draws,
-            freq,
-            freq_p,
-            rec,
-            rec_p
-        )
-
-    except Exception as e:
-
-        st.error(f"build_model() error: {e}")
-
-        return (
-            [],
-            Counter(),
-            {},
-            {},
-            {}
-        )
 # =====================================================
-# BEST PICK OPTIMIZER
+# MARKOV CHAIN ENGINE
+# =====================================================
+
+def build_markov_chain(draws):
+
+    transitions = defaultdict(Counter)
+
+    for i in range(len(draws) - 1):
+
+        current_draw = draws[i]
+        next_draw = draws[i + 1]
+
+        for n in current_draw:
+            for nxt in next_draw:
+                transitions[n][nxt] += 1
+
+    return transitions
+
+
+def markov_prediction(transitions):
+
+    scores = Counter()
+
+    for current_num, next_nums in transitions.items():
+
+        total = sum(next_nums.values())
+
+        if total == 0:
+            continue
+
+        for nxt, count in next_nums.items():
+
+            scores[nxt] += count / total
+
+    return scores
+
+# =====================================================
+# MONTE CARLO ENGINE
+# =====================================================
+
+def monte_carlo_simulation(final_probs, simulations=5000):
+
+    simulation_counts = Counter()
+
+    numbers = list(final_probs.keys())
+
+    weights = np.array(list(final_probs.values()))
+
+    weights = weights / weights.sum()
+
+    for _ in range(simulations):
+
+        simulated_draw = np.random.choice(
+            numbers,
+            size=12,
+            replace=False,
+            p=weights
+        )
+
+        for n in simulated_draw:
+            simulation_counts[n] += 1
+
+    return simulation_counts
+
+# =====================================================
+# OPTIMIZER
 # =====================================================
 
 def optimize_best_picks(final_probs):
@@ -559,7 +497,7 @@ def optimize_best_picks(final_probs):
     }
 
 # =====================================================
-# LIVE COMMENTARY GENERATOR
+# COMMENTARY ENGINE
 # =====================================================
 
 def generate_updates(freq, rec):
@@ -579,77 +517,21 @@ def generate_updates(freq, rec):
         if rec[n] > avg_rec
     ][:6]
 
-    overlap = list(
-        set(hot).intersection(set(rising))
-    )[:6]
+    overlap = list(set(hot).intersection(set(rising)))[:6]
 
     if hot:
-        msgs.append(f"🔥 Hot numbers picking up: {hot}")
+        msgs.append(f"🔥 Hot Numbers: {hot}")
 
     if rising:
-        msgs.append(f"📈 Rising trend numbers: {rising}")
+        msgs.append(f"📈 Rising Numbers: {rising}")
 
     if overlap:
-        msgs.append(f"🚀 Strong signals forming: {overlap}")
+        msgs.append(f"🚀 Strong Momentum: {overlap}")
 
     return msgs
 
 # =====================================================
-# MARKOV CHAIN MODEL
-# =====================================================
-def build_markov_chain(draws):
-    transitions = defaultdict(Counter)
-
-    for i in range(len(draws) - 1):
-        current_draw = draws[i]
-        next_draw = draws[i + 1]
-
-        for n in current_draw:
-            for nxt in next_draw:
-                transitions[n][nxt] += 1
-
-    return transitions
-
-
-def markov_prediction(transitions):
-    scores = Counter()
-
-    for current_num, next_nums in transitions.items():
-        total = sum(next_nums.values())
-
-        if total == 0:
-            continue
-
-        for nxt, count in next_nums.items():
-            scores[nxt] += count / total
-
-    return scores
-
-# =====================================================
-# MONTE CARLO SIMULATION
-# =====================================================
-def monte_carlo_simulation(final_probs, simulations=5000):
-    simulation_counts = Counter()
-
-    numbers = list(final_probs.keys())
-    weights = np.array(list(final_probs.values()))
-    weights = weights / weights.sum()
-
-    for _ in range(simulations):
-        simulated_draw = np.random.choice(
-            numbers,
-            size=12,
-            replace=False,
-            p=weights
-        )
-
-        for n in simulated_draw:
-            simulation_counts[n] += 1
-
-    return simulation_counts
-
-# =====================================================
-# 24H COMMENTARY CLEANUP
+# COMMENTARY CLEANUP
 # =====================================================
 
 def cleanup_old_commentary():
@@ -674,49 +556,56 @@ def cleanup_old_commentary():
 # SAVE DRAW
 # =====================================================
 
-def save_draw_to_firebase(nums, comment):
+def save_draw(nums, comment):
 
     now = datetime.now().isoformat()
 
     cleanup_old_commentary()
 
-    # save draw
+    # =========================================
+    # SAVE DRAW
+    # =========================================
+
     add_doc("draws", {
         "numbers": nums,
         "comment": comment,
         "date": now
     })
 
-    # save trend
+    # =========================================
+    # SAVE TREND
+    # =========================================
+
     add_doc("trend", {
         "numbers": nums,
         "date": now
     })
 
-    # optimized pair aggregation
+    # =========================================
+    # UPDATE PAIRS
+    # =========================================
+
     for i in range(len(nums)):
         for j in range(i + 1, len(nums)):
 
-            pair = (
-                f"{min(nums[i], nums[j])}-"
-                f"{max(nums[i], nums[j])}"
-            )
+            pair = f"{min(nums[i], nums[j])}-{max(nums[i], nums[j])}"
 
             upsert_pair(pair)
 
-    # analytics
+    # =========================================
+    # GENERATE COMMENTARY
+    # =========================================
+
     draws_data = get_collection_docs("draws", 150)
 
     draws, freq, freq_p, rec, rec_p = build_model(draws_data)
 
     updates = generate_updates(freq, rec)
 
-    # commentary save
     add_doc("commentary", {
         "date": now,
         "messages": (
-            [f"✅ New draw inserted: {nums}"]
-            + updates
+            [f"✅ New Draw Added: {nums}"] + updates
         )
     })
 
@@ -736,6 +625,7 @@ def transparent_chart(fig, height=420):
 
     return fig
 
+
 def plot_heatmap(draws):
 
     if not draws:
@@ -750,6 +640,7 @@ def plot_heatmap(draws):
 
     return transparent_chart(fig)
 
+
 def plot_pair_network(pairs_docs):
 
     if not pairs_docs:
@@ -757,7 +648,7 @@ def plot_pair_network(pairs_docs):
 
     G = nx.Graph()
 
-    for row in pairs_docs[:30]:
+    for row in pairs_docs[:40]:
 
         pair = row.get("pair")
 
@@ -797,12 +688,12 @@ def plot_pair_network(pairs_docs):
             text=[str(n) for n in G.nodes()],
             mode="markers+text",
             textposition="top center",
-            marker=dict(size=22)
+            marker=dict(size=20)
         )
     )
 
     fig.update_layout(
-        height=550,
+        height=600,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
@@ -810,208 +701,36 @@ def plot_pair_network(pairs_docs):
     return fig
 
 # =====================================================
-# DYNAMIC ADMIN CSS
+# SIDEBAR
 # =====================================================
 
-if IS_ADMIN:
+st.sidebar.title("🎰 Lottery AI PRO")
 
-    HIDE_STREAMLIT_STYLE = ""
-
-else:
-
-    HIDE_STREAMLIT_STYLE = """
-
-    #MainMenu {
-        visibility: hidden;
-    }
-
-    header {
-        visibility: hidden;
-    }
-
-    footer {
-        visibility: hidden;
-    }
-
-    [data-testid="stToolbar"] {
-        display: none;
-    }
-
-    """
-
-st.markdown(f"""
-<style>
-
-{HIDE_STREAMLIT_STYLE}
-
-.stApp {{
-    background:
-        linear-gradient(rgba(5,10,30,.82),
-        rgba(5,10,30,.92)),
-        url("data:image/webp;base64,{dashboard_bg}");
-
-    background-size: cover;
-    background-attachment: fixed;
-    color: white;
-}}
-
-[data-testid="stSidebar"] {{
-    background:
-        linear-gradient(rgba(10,20,60,.88),
-        rgba(5,10,30,.95)),
-        url("data:image/webp;base64,{sidebar_bg}");
-
-    background-size: cover;
-}}
-
-.ticket-card {{
-    background: rgba(15,23,42,.72);
-    border-top: 4px solid #fbbf24;
-    border-radius: 24px;
-    padding: 20px;
-    margin-bottom: 18px;
-    box-shadow: 0 0 30px rgba(251,191,36,.35);
-}}
-
-.ball {{
-    background:
-        radial-gradient(circle at 30% 30%,
-        #fbbf24,
-        #ef4444);
-
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-weight:900;
-    color:white;
-}}
-
-.number-grid {{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
-}}
-
-.commentary-box {{
-    background: rgba(30,41,59,.75);
-    border-left:4px solid #22c55e;
-    border-radius:14px;
-    padding:12px;
-    margin-bottom:10px;
-}}
-
-</style>
-""", unsafe_allow_html=True)
-
-
-
-# =====================================================
-# ADMIN SIDEBAR
-# =====================================================
-
-if IS_ADMIN:
-
-    # SHOW NORMAL STREAMLIT MENU FOR ADMIN
-    st.markdown("""
-    <style>
-
-    #MainMenu {
-        visibility: visible !important;
-    }
-
-    header {
-        visibility: visible !important;
-    }
-
-    [data-testid="stToolbar"] {
-        display: block !important;
-    }
-
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.success(f"""
-    👑 ADMIN ACCESS
-
-    {USER_EMAIL}
-    """)
-
-  
-    # ADMIN NAVIGATION
-    pages = [
-    "Dashboard",
-    "Add Draw",
-    "History",
-    "Finance",
-    "Users",
-    "Reset"
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Add Draw",
+        "History",
+        "Finance",
+        "Reset"
     ]
+)
 
-    page = st.sidebar.radio(
-        "📂 Admin Navigation",
-        pages
-    )
-
-    advanced_graphs = st.sidebar.toggle(
-        "Advanced Graphs"
-    )
+advanced_graphs = st.sidebar.toggle("Advanced Graphs")
 
 # =====================================================
-# SUBSCRIBER / INVITED USER MODE
-# =====================================================
-
-else:
-
-    st.markdown("""
-    <style>
-
-    #MainMenu {
-        visibility: hidden !important;
-    }
-
-    header {
-        visibility: hidden !important;
-    }
-
-    footer {
-        visibility: hidden !important;
-    }
-
-    [data-testid="stToolbar"] {
-        display: none !important;
-    }
-
-    section[data-testid="stSidebar"] {
-        display: none !important;
-    }
-
-    </style>
-    """, unsafe_allow_html=True)
-
-    # USERS CAN ONLY SEE DASHBOARD
-    page = "Dashboard"
-
-    advanced_graphs = False
-    
-# =====================================================
-# ADD DRAW
+# ADD DRAW PAGE
 # =====================================================
 
 if page == "Add Draw":
-    
-    if not IS_ADMIN:
-        st.error("Unauthorized Access")
-        st.stop()
 
-    st.subheader("➕ Add Draw")
+    st.title("➕ Add Draw")
 
     with st.form("draw_form"):
 
         inp = st.text_input(
-            "Enter 12 unique numbers comma separated"
+            "Enter 12 Unique Numbers"
         )
 
         comment = st.text_input("Commentary")
@@ -1022,31 +741,28 @@ if page == "Add Draw":
 
         try:
 
-            nums = [
+            nums = sorted(list(set([
                 int(x.strip())
                 for x in inp.split(",")
                 if x.strip()
-            ]
+            ])))
 
-            if len(nums) == 12 and len(set(nums)) == 12:
+            if len(nums) != 12:
 
-                updates = save_draw_to_firebase(
-                    nums,
-                    comment
-                )
+                st.error("Enter Exactly 12 Unique Numbers")
 
-                st.success("✅ Draw saved successfully")
+            else:
+
+                updates = save_draw(nums, comment)
+
+                st.success("✅ Draw Saved")
 
                 for msg in updates:
                     st.info(msg)
 
-            else:
-                st.error(
-                    "Enter exactly 12 unique numbers."
-                )
-
         except:
-            st.error("Invalid input.")
+
+            st.error("Invalid Input")
 
 # =====================================================
 # DASHBOARD
@@ -1055,89 +771,47 @@ if page == "Add Draw":
 elif page == "Dashboard":
 
     st.title("🎰 Lottery AI PRO Dashboard")
-    
-    if IS_ADMIN:
 
-        st.success(f"""
-        👑 ADMIN ACCESS ACTIVE
-        
-        Logged in as:
-        {USER_EMAIL}
-        """)
-
-    else:
-
-        st.info(f"""
-        🔐 Subscriber Dashboard
-        
-        Logged in as:
-        {USER_EMAIL}
-        """)
-
-    st.success("""
-    ✅ Connected Successfully
-
-    Reload numbers anytime to view latest draws.
-    """)
-
-    draws_data = get_collection_docs("draws", 80)
-    
-    if IS_ADMIN:
-      finance_data = get_collection_docs("finance", 200)
-      
-    else:
-        
-      finance_data = []
-    
+    draws_data = get_collection_docs("draws", 100)
+    finance_data = get_collection_docs("finance", 300)
     commentary_data = get_collection_docs("commentary", 10)
-    pairs_data = get_collection_docs("pairs", 30)
-
-    st.markdown("""
-    <div class='ticket-card'>
-        <h3>🎉 Welcome Back</h3>
-        <p>
-        Firebase synced analytics dashboard with
-        advanced prediction intelligence.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    pairs_data = get_collection_docs("pairs", 50)
 
     if not draws_data:
-        st.warning("No draws yet")
+
+        st.warning("No Draws Available")
+
         st.stop()
+
+    # =========================================
+    # MODEL
+    # =========================================
 
     draws, freq, freq_p, rec, rec_p = build_model(draws_data)
 
-    # =====================================================
-    # HYBRID PROBABILITY ENGINE
-    # =====================================================
-
-    # base probability
     base_probs = {
-        n: ((0.6 * freq_p[n]) + (0.4 * rec_p[n]))
+        n: (
+            (0.6 * freq_p[n]) +
+            (0.4 * rec_p[n])
+        )
         for n in NUMBERS
     }
 
-    # markov analysis
     transitions = build_markov_chain(draws)
+
     markov_scores = markov_prediction(transitions)
 
-    # combine markov + base
     combined_probs = {}
 
     for n in NUMBERS:
+
         combined_probs[n] = (
-            (base_probs.get(n, 0) * 0.7)
-            +
+            (base_probs.get(n, 0) * 0.7) +
             (markov_scores.get(n, 0) * 0.3)
         )
 
-    # monte carlo simulation
     monte_results = monte_carlo_simulation(combined_probs)
 
-    # final probability engine
-    # final probability engine
-    # final probability engine
     final_probs = {}
 
     for n in NUMBERS:
@@ -1148,9 +822,9 @@ elif page == "Dashboard":
             (monte_results.get(n, 0) / 100000)
         )
 
-    # =====================================================
-    # FINANCE ANALYTICS
-    # =====================================================
+    # =========================================
+    # FINANCE
+    # =========================================
 
     fin_df = pd.DataFrame(finance_data)
 
@@ -1169,36 +843,14 @@ elif page == "Dashboard":
         if spent else 0
     )
 
-    spent = (
-        fin_df["stake"].sum()
-        if not fin_df.empty else 0
-    )
-
-    profit = (
-        fin_df["profit"].sum()
-        if not fin_df.empty else 0
-    )
-
-    roi = (
-        (profit / spent) * 100
-        if spent else 0
-    )
-
-    profit_color = (
-        "#22c55e"
-        if profit >= 0
-        else "#ef4444"
-    )
-
-    roi_color = (
-        "#22c55e"
-        if roi >= 0
-        else "#ef4444"
-    )
+    # =========================================
+    # CARDS
+    # =========================================
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
+
         st.markdown(f"""
         <div class='ticket-card'>
             <h4>💸 Expense</h4>
@@ -1207,26 +859,27 @@ elif page == "Dashboard":
         """, unsafe_allow_html=True)
 
     with c2:
+
         st.markdown(f"""
         <div class='ticket-card'>
             <h4>💰 Profit</h4>
-            <h2 style='color:{profit_color};'>
-            R {profit:,.2f}
-            </h2>
+            <h2>R {profit:,.2f}</h2>
         </div>
         """, unsafe_allow_html=True)
 
     with c3:
+
         st.markdown(f"""
         <div class='ticket-card'>
             <h4>📈 ROI</h4>
-            <h2 style='color:{roi_color};'>
-            {roi:.2f}%
-            </h2>
+            <h2>{roi:.2f}%</h2>
         </div>
         """, unsafe_allow_html=True)
 
-    # charts
+    # =========================================
+    # CHARTS
+    # =========================================
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -1267,17 +920,24 @@ elif page == "Dashboard":
             use_container_width=True
         )
 
-    # heatmap
+    # =========================================
+    # HEATMAP
+    # =========================================
+
     heatmap = plot_heatmap(draws)
 
     if heatmap:
+
         st.plotly_chart(
             heatmap,
             use_container_width=True
         )
 
-    # commentary
-    st.subheader("📝 Live Update Commentary")
+    # =========================================
+    # COMMENTARY
+    # =========================================
+
+    st.subheader("📝 Live Commentary")
 
     for row in commentary_data:
 
@@ -1287,26 +947,45 @@ elif page == "Dashboard":
                 f"<div class='commentary-box'>{msg}</div>",
                 unsafe_allow_html=True
             )
-            
-    with st.expander("🧠 Markov Chain Scores"):
+
+    # =========================================
+    # MARKOV DATA
+    # =========================================
+
+    with st.expander("🧠 Markov Scores"):
+
         st.dataframe(
             pd.DataFrame({
                 "Number": list(markov_scores.keys()),
                 "Score": list(markov_scores.values())
-            }).sort_values(by="Score", ascending=False),
-            use_container_width=True
-        )
-    
-    with st.expander("🎲 Monte Carlo Results"):
-        st.dataframe(
-            pd.DataFrame({
-                "Number": list(monte_results.keys()),
-                "Simulated Hits": list(monte_results.values())
-            }).sort_values(by="Simulated Hits", ascending=False),
+            }).sort_values(
+                by="Score",
+                ascending=False
+            ),
             use_container_width=True
         )
 
-    # optimizer
+    # =========================================
+    # MONTE CARLO DATA
+    # =========================================
+
+    with st.expander("🎲 Monte Carlo Results"):
+
+        st.dataframe(
+            pd.DataFrame({
+                "Number": list(monte_results.keys()),
+                "Hits": list(monte_results.values())
+            }).sort_values(
+                by="Hits",
+                ascending=False
+            ),
+            use_container_width=True
+        )
+
+    # =========================================
+    # BEST PICKS
+    # =========================================
+
     st.subheader("🎯 Best 4–8 Picks Optimizer")
 
     best_sets = optimize_best_picks(final_probs)
@@ -1330,12 +1009,15 @@ elif page == "Dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-    # smart sections
+    # =========================================
+    # SMART TICKET SECTIONS
+    # =========================================
+
     st.subheader("🎟️ Smart Ticket Sections")
 
     for sec in range(1, 5):
 
-        st.markdown(f"### Section {sec}")
+        st.markdown(f"## Section {sec}")
 
         cols = st.columns(4)
 
@@ -1347,7 +1029,6 @@ elif page == "Dashboard":
 
             weights /= weights.sum()
 
-            # Monte Carlo weighted generator
             ticket = sorted(
                 np.random.choice(
                     NUMBERS,
@@ -1373,8 +1054,11 @@ elif page == "Dashboard":
                 </div>
                 """, unsafe_allow_html=True)
 
-    # recent history
-    st.subheader("📚 Recent History")
+    # =========================================
+    # HISTORY
+    # =========================================
+
+    st.subheader("📚 Recent Draw History")
 
     hist_df = pd.DataFrame(draws_data[-10:])
 
@@ -1385,30 +1069,30 @@ elif page == "Dashboard":
         use_container_width=True
     )
 
-    # advanced graph
+    # =========================================
+    # ADVANCED GRAPH
+    # =========================================
+
     if advanced_graphs:
 
-        st.subheader("🕸️ Advanced Pair Graph")
+        st.subheader("🕸️ Pair Network")
 
         fig = plot_pair_network(pairs_data)
 
         if fig:
+
             st.plotly_chart(
                 fig,
                 use_container_width=True
             )
 
 # =====================================================
-# HISTORY
+# HISTORY PAGE
 # =====================================================
 
 elif page == "History":
 
-    if not IS_ADMIN:
-        st.error("Unauthorized Access")
-        st.stop()
-
-    st.subheader("📚 History Manager")
+    st.title("📚 Draw History")
 
     df = pd.DataFrame(
         get_collection_docs("draws", 300)
@@ -1428,31 +1112,24 @@ elif page == "History":
             use_container_width=True
         )
 
-        if st.button("🗑️ Delete Latest Row"):
+        if st.button("🗑️ Delete Latest Draw"):
 
             delete_doc(
                 "draws",
                 df.iloc[-1]["_id"]
             )
 
-            st.success(
-                "✅ Latest row deleted successfully"
-            )
+            st.success("Latest Draw Deleted")
 
             st.rerun()
 
-
 # =====================================================
-# FINANCE
+# FINANCE PAGE
 # =====================================================
 
 elif page == "Finance":
 
-    st.subheader("💵 Personal Finance Tracker")
-
-    # =====================================================
-    # SAVE USER FINANCE DATA
-    # =====================================================
+    st.title("💵 Finance Tracker")
 
     with st.form("finance_form"):
 
@@ -1470,70 +1147,22 @@ elif page == "Finance":
     if submitted:
 
         add_doc("finance", {
-            "email": USER_EMAIL,
             "stake": stake,
             "profit": profit,
             "date": datetime.now().isoformat()
         })
 
-        st.success("✅ Finance saved successfully")
-
-    # =====================================================
-    # LOAD FINANCE DATA
-    # =====================================================
+        st.success("Finance Saved")
 
     finance_df = pd.DataFrame(
         get_collection_docs("finance", 500)
     )
 
-    # =====================================================
-    # USER VIEW
-    # =====================================================
-
-    if not IS_ADMIN:
-
-        finance_df = finance_df[
-            finance_df["email"] == USER_EMAIL
-        ]
-
-    # =====================================================
-    # ADMIN VIEW
-    # =====================================================
-
-    if IS_ADMIN:
-
-        st.success("""
-        👑 ADMIN FINANCE VIEW
-        
-        You can see all user finance records.
-        """)
-
-    else:
-
-        st.info(f"""
-        🔐 Personal Finance Tracker
-        
-        Logged in as:
-        {USER_EMAIL}
-        """)
-
-    # =====================================================
-    # EMPTY STATE
-    # =====================================================
-
     if finance_df.empty:
 
-        st.warning("""
-        No finance records yet.
-        
-        Add your first finance entry above.
-        """)
+        st.warning("No Finance Records")
 
     else:
-
-        # =====================================================
-        # ANALYTICS
-        # =====================================================
 
         spent = finance_df["stake"].sum()
 
@@ -1544,213 +1173,44 @@ elif page == "Finance":
             if spent else 0
         )
 
-        # =====================================================
-        # CARDS
-        # =====================================================
-
         c1, c2, c3 = st.columns(3)
 
         with c1:
 
-            st.markdown(f"""
-            <div class='ticket-card'>
-                <h4>💸 Total Stake</h4>
-                <h2>R {spent:,.2f}</h2>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Total Stake", f"R {spent:,.2f}")
 
         with c2:
 
-            color = (
-                "#22c55e"
-                if total_profit >= 0
-                else "#ef4444"
-            )
-
-            st.markdown(f"""
-            <div class='ticket-card'>
-                <h4>💰 Total Profit</h4>
-                <h2 style='color:{color};'>
-                R {total_profit:,.2f}
-                </h2>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Total Profit", f"R {total_profit:,.2f}")
 
         with c3:
 
-            roi_color = (
-                "#22c55e"
-                if roi >= 0
-                else "#ef4444"
-            )
-
-            st.markdown(f"""
-            <div class='ticket-card'>
-                <h4>📈 ROI</h4>
-                <h2 style='color:{roi_color};'>
-                {roi:.2f}%
-                </h2>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # =====================================================
-        # FINANCE TABLE
-        # =====================================================
-
-        st.subheader("📋 Finance Records")
-
-        display_columns = [
-            "stake",
-            "profit",
-            "date"
-        ]
-
-        if IS_ADMIN:
-            display_columns.insert(0, "email")
+            st.metric("ROI", f"{roi:.2f}%")
 
         st.dataframe(
-            finance_df[display_columns],
+            finance_df[
+                [
+                    "stake",
+                    "profit",
+                    "date"
+                ]
+            ],
             use_container_width=True
         )
-
-    # =====================================================
-    # RESET BUTTON
-    # =====================================================
-
-    if IS_ADMIN:
 
         if st.button("🗑️ Reset Finance Data"):
 
             reset_collection("finance")
 
-            st.success("""
-            ✅ All finance data reset successfully.
-            """)
+            st.success("Finance Reset Complete")
+
 # =====================================================
-# USERS PAGE
-# =====================================================
-
-elif page == "Users":
-
-    if not IS_ADMIN:
-        st.stop()
-
-    st.title("👥 Approved Users")
-
-    # =========================================
-    # ADD USER
-    # =========================================
-
-    with st.form("add_user_form"):
-
-        new_email = st.text_input(
-            "User Gmail"
-        )
-
-        submitted = st.form_submit_button(
-            "Approve User"
-        )
-
-    if submitted:
-
-        email = (
-            new_email
-            .lower()
-            .strip()
-        )
-
-        if email:
-
-            db.collection(
-                "approved_users"
-            ).add({
-                "email": email,
-                "approved_at":
-                datetime.now().isoformat()
-            })
-
-            st.success(
-                f"{email} approved successfully"
-            )
-
-            st.rerun()
-
-    # =========================================
-    # SHOW USERS
-    # =========================================
-
-    docs = db.collection(
-        "approved_users"
-    ).stream()
-
-    users = []
-
-    for doc in docs:
-
-        data = doc.to_dict()
-
-        users.append({
-            "id": doc.id,
-            "email": data.get("email"),
-            "approved_at":
-            data.get("approved_at")
-        })
-
-    if users:
-
-        users_df = pd.DataFrame(users)
-
-        st.dataframe(
-            users_df,
-            use_container_width=True
-        )
-
-        # =====================================
-        # REMOVE USER
-        # =====================================
-
-        remove_email = st.selectbox(
-            "Remove User",
-            users_df["email"]
-        )
-
-        if st.button("❌ Remove Access"):
-
-            target = users_df[
-                users_df["email"]
-                == remove_email
-            ]
-
-            if not target.empty:
-
-                doc_id = target.iloc[0]["id"]
-
-                db.collection(
-                    "approved_users"
-                ).document(doc_id).delete()
-
-                st.success(
-                    "User removed"
-                )
-
-                st.rerun()
-
-    else:
-
-        st.info(
-            "No approved users yet."
-        )
-# =====================================================
-# RESET
+# RESET PAGE
 # =====================================================
 
 elif page == "Reset":
 
-    if not IS_ADMIN:
-        st.error("Unauthorized Access")
-        st.stop()
-    
-    st.title("⚠️ Reset All Firebase Data")
+    st.title("⚠️ Reset System")
 
     if st.button("🗑️ Reset Everything"):
 
@@ -1758,6 +1218,5 @@ elif page == "Reset":
             reset_collection(name)
 
         st.success("""
-        ✅ Reset completed successfully.
-        All collections were cleared.
+        ✅ ALL FIREBASE COLLECTIONS CLEARED
         """)
