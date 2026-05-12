@@ -53,6 +53,40 @@ st.set_page_config(
 )
 
 
+# =====================================================
+# FIREBASE INIT
+# =====================================================
+
+@st.cache_resource
+def init_firebase():
+
+    try:
+
+        if firebase_admin._apps:
+            return firestore.client()
+
+        config = dict(st.secrets["FIREBASE"])
+
+        config["private_key"] = (
+            config["private_key"]
+            .replace("\\n", "\n")
+            .strip()
+        )
+
+        cred = credentials.Certificate(config)
+
+        firebase_admin.initialize_app(cred)
+
+        return firestore.client()
+
+    except Exception as e:
+
+        st.error(f"🔥 Firebase auth failed: {e}")
+
+        return None
+
+
+db = init_firebase()
 
 # =====================================================
 # REAL USER AUTH SYSTEM
@@ -65,17 +99,23 @@ def get_user_email():
         user = st.experimental_user
 
         if user and user.email:
-            return user.email.lower().strip()
 
-    except:
+            return (
+                user.email
+                .lower()
+                .strip()
+            )
+
+    except Exception:
         pass
 
     return None
 
+
 USER_EMAIL = get_user_email()
 
 # =====================================================
-# ADMIN WHITELIST
+# ADMIN EMAILS
 # =====================================================
 
 ADMIN_EMAILS = [
@@ -83,16 +123,21 @@ ADMIN_EMAILS = [
 ]
 
 # =====================================================
-# APPROVED USER CHECK
+# LOAD APPROVED USERS
 # =====================================================
 
+@st.cache_data(ttl=300)
 def get_approved_users():
+
+    if db is None:
+        return []
 
     try:
 
-        docs = db.collection(
-            "approved_users"
-        ).stream()
+        docs = (
+            db.collection("approved_users")
+            .stream()
+        )
 
         approved = []
 
@@ -119,35 +164,51 @@ def get_approved_users():
 
         return []
 
-APPROVED_USERS = get_approved_users()
 
+APPROVED_USERS = get_approved_users()
 
 # =====================================================
 # ROLE DETECTION
 # =====================================================
 
-IS_ADMIN = USER_EMAIL in ADMIN_EMAILS
+IS_ADMIN = (
+    USER_EMAIL is not None
+    and USER_EMAIL in [
+        email.lower().strip()
+        for email in ADMIN_EMAILS
+    ]
+)
 
-IS_APPROVED_USER = USER_EMAIL in APPROVED_USERS
+IS_APPROVED_USER = (
+    USER_EMAIL is not None
+    and USER_EMAIL in APPROVED_USERS
+)
 
 NUMBERS = list(range(1, 25))
 
 # =====================================================
-# HARD ACCESS CONTROL
+# ACCESS CONTROL
 # =====================================================
 
 if USER_EMAIL is None:
 
-    st.error("Please login first.")
+    st.error("""
+    Please login first.
+    
+    Open this app using your invitation link
+    and sign in with Google.
+    """)
+
     st.stop()
 
-# BLOCK NON-APPROVED USERS
 if not IS_ADMIN and not IS_APPROVED_USER:
 
-    st.error("""
+    st.error(f"""
     Access denied.
 
-    Your email is not approved.
+    Your Gmail is not approved:
+    
+    {USER_EMAIL}
     """)
 
     st.stop()
@@ -794,9 +855,6 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================================
-# SECURE ROLE-BASED ACCESS SYSTEM
-# =====================================================
 
 # -----------------------------
 # ADMIN EMAILS
@@ -1358,9 +1416,6 @@ elif page == "History":
 
             st.rerun()
 
-# =====================================================
-# FINANCE
-# =====================================================  
 
 # =====================================================
 # FINANCE
