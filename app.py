@@ -296,52 +296,73 @@ def compute_markov_transition_proportions(transition_matrix):
     return normalized_markov_proportions
 
 # =====================================================
-# PRO-LEVEL MONTE CARLO SIMULATION ENGINE (1,000 DRAWS)
+# ADVANCED SaaS-LEVEL MONTE CARLO CORE (RAW LOG COUNTS)
 # =====================================================
-def execute_monte_carlo_simulations(proportional_seed_weights, total_iterations=1000):
+def execute_monte_carlo_simulations(proportional_seed_weights, total_iterations=5000):
     """
-    Executes a high-fidelity probabilistic simulation modeling exactly 1,000 
-    independent draw trials using dynamic weight tracking without replacement.
+    Executes a high-fidelity simulation modeling independent draw trials.
+    Returns raw distribution integers (2000+) to feed analytical matrices perfectly.
     """
     simulated_hit_matrix = Counter()
     candidate_numbers = list(proportional_seed_weights.keys())
     base_weights = np.array(list(proportional_seed_weights.values()))
     
-    # Handle edge case where all input probabilities are zero
     if base_weights.sum() == 0:
         base_weights = np.ones(len(candidate_numbers)) / len(candidate_numbers)
     else:
         base_weights = base_weights / base_weights.sum()
 
+    # Scaled up to 5,000 iterations to safely cross into the 2000+ raw hits threshold
     for _ in range(total_iterations):
-        # Create temporary tracking arrays for dynamic selection without replacement
-        current_pool = list(candidate_numbers)
-        current_weights = list(base_weights)
+        active_pool = list(candidate_numbers)
+        active_weights = list(base_weights)
         
-        # Simulating a professional 12-ball draw selection process
+        # Simulate a clean 12-ball selection process without replacement
         for _ in range(12):
-            w_sum = sum(current_weights)
-            if w_sum == 0:
-                # Fallback to uniform distribution if weights become zero
-                normalized_weights = np.ones(len(current_pool)) / len(current_pool)
+            current_weight_sum = sum(active_weights)
+            if current_weight_sum == 0:
+                normalized_probabilities = np.ones(len(active_pool)) / len(active_pool)
             else:
-                normalized_weights = [w / w_sum for w in current_weights]
+                normalized_probabilities = [w / current_weight_sum for w in active_weights]
                 
-            # Probabilistic selection of a single ball
-            chosen_ball = np.random.choice(current_pool, p=normalized_weights)
-            simulated_hit_matrix[chosen_ball] += 1
+            selected_ball = np.random.choice(active_pool, p=normalized_probabilities)
             
-            # Remove the selected ball and its weight from the remaining pool
-            chosen_index = current_pool.index(chosen_ball)
-            current_pool.pop(chosen_index)
-            current_weights.pop(chosen_index)
+            # Keep raw tracking counts intact instead of fractioning them
+            simulated_hit_matrix[selected_ball] += 1
+            
+            target_index = active_pool.index(selected_ball)
+            active_pool.pop(target_index)
+            active_weights.pop(target_index)
 
-    # Normalize total counts into exact probability proportions
-    total_simulated_hits_logged = sum(simulated_hit_matrix.values()) or 1.0
-    normalized_monte_carlo_proportions = {
-        num: simulated_hit_matrix[num] / total_simulated_hits_logged for num in NUMBERS
-    }
-    return normalized_monte_carlo_proportions
+    # Return raw integer counts directly to match your UI tables and dashboard matrix
+    raw_integer_distribution = {num: int(simulated_hit_matrix[num]) for num in NUMBERS}
+    return raw_integer_distribution
+
+
+# =====================================================
+# AUTOMATED COMMENTARY EXPIRATION CLEANUP (24-HOUR LIFE)
+# =====================================================
+def prune_expired_commentary_logs():
+    """
+    Scans the commentary collection and removes any log entries 
+    that were created more than 24 hours ago to protect storage.
+    """
+    stored_commentary_logs = fetch_collection_records("commentary", row_limit=500)
+    current_time = datetime.now()
+    
+    purged_count = 0
+    for log_record in stored_commentary_logs:
+        try:
+            # Parse the ISO timestamp back into a datetime object
+            parsed_creation_date = datetime.fromisoformat(log_record["date"])
+            time_difference = current_time - parsed_creation_date
+            
+            # If the log comment is older than 24 hours, delete it from Firestore
+            if time_difference > timedelta(days=1):
+                purge_document_by_id("commentary", log_record["_id"])
+                purged_count += 1
+        except Exception as e:
+            continue
 # =====================================================
 # PREDICTION GENERATOR & MATRIX PICK OPTIMIZER
 # =====================================================
@@ -569,6 +590,9 @@ if selected_navigation_route == "Add Draw":
 elif selected_navigation_route == "Dashboard":
     st.title("🎰 Lottery AI PRO Final v25 Analytics Dashboard")
 
+    # TRIGGER ENGINE AUTO-CLEANUP: Wipes text comments older than 24 hours on view load
+    prune_expired_commentary_logs()
+
     # Sync all primary pipeline tables simultaneously from the database
     with st.spinner("Syncing data matrices from Firestore..."):
         historical_draws_cache = fetch_collection_records("draws", 100)
@@ -580,31 +604,37 @@ elif selected_navigation_route == "Dashboard":
         st.warning("📊 Initial Sync Empty: Please populate entries via the 'Add Draw' node to build statistical models.")
         st.stop()
 
-    # EXECUTE INTEGRATED ARCHITECTURE LOGIC PIPELINES
+    # =====================================================
+    # ENGINE COUPLING LAYER: RUNNING MONTE CARLO ON HISTORY
+    # =====================================================
     validated_draws, long_term_freq, normalized_freq_p, recent_decay_weights, normalized_rec_p = evaluate_statistical_baselines(historical_draws_cache)
     markov_transition_graph = process_markov_state_transitions(validated_draws)
     normalized_markov_p = compute_markov_transition_proportions(markov_transition_graph)
     
-    # Generate interim distribution weights for the Monte Carlo seed configuration
+    # Compile interim seed weights based on historical configurations
     interim_distribution_seed = {}
     for token in NUMBERS:
         interim_distribution_seed[token] = (normalized_freq_p.get(token, 0.0) * 0.6) + (normalized_rec_p.get(token, 0.0) * 0.4)
         if token in normalized_markov_p:
             interim_distribution_seed[token] = (interim_distribution_seed[token] * 0.7) + (normalized_markov_p[token] * 0.3)
+    # 3. Fire the Advanced Monte Carlo simulation returning raw hit counters
+    raw_monte_carlo_counts = execute_monte_carlo_simulations(interim_distribution_seed, total_iterations=5000)
 
-    normalized_monte_carlo_p = execute_monte_carlo_simulations(interim_distribution_seed, total_iterations=1000)
+    # Convert raw counts to safe temporary weights for balanced hybrid blending
+    max_sim_hit = max(raw_monte_carlo_counts.values()) or 1
+    normalized_sim_weights = {num: (count / max_sim_hit) for num, count in raw_monte_carlo_counts.items()}
 
-    # MASTER ARITHMETIC HYBRID SYSTEM PROBABILITY FORMULA
+    # 4. Master Hybrid System Integration Formula (Perfect mathematical scale balancing)
     final_hybrid_ai_scores = {}
     for token in NUMBERS:
         final_hybrid_ai_scores[token] = (
             (normalized_freq_p.get(token, 0.0) * 0.25) +
             (normalized_rec_p.get(token, 0.0) * 0.20) +
             (normalized_markov_p.get(token, 0.0) * 0.30) +
-            (normalized_monte_carlo_p.get(token, 0.0) * 0.25)
+            (normalized_sim_weights.get(token, 0.0) * 0.25)
         )
 
-    # Rank indices based on final unified scoring outcomes
+    # Establish rankings based on the simulation-influenced scores
     ranked_analytical_numbers = [num for num, _ in sorted(final_hybrid_ai_scores.items(), key=lambda node: node[1], reverse=True)]
 
     # CALCULATE FINANCIAL BALANCES
@@ -648,15 +678,15 @@ elif selected_navigation_route == "Dashboard":
     else:
         st.info("Commentary log buffers are currently refreshing or empty.")
 
-    # MODEL METRIC LOG EXPANDERS
+   # MODEL METRIC LOG EXPANDERS
     expander_col1, expander_col2 = st.columns(2)
     with expander_col1:
         with st.expander("🧠 Markov Chain Probability Distribution Map"):
             st.dataframe(pd.DataFrame({"Number": list(normalized_markov_p.keys()), "Transition Score": list(normalized_markov_p.values())}).sort_values(by="Transition Score", ascending=False), use_container_width=True)
     with expander_col2:
         with st.expander("🎲 Monte Carlo Simulation Generated Density Proportions"):
-            st.dataframe(pd.DataFrame({"Number": list(normalized_monte_carlo_p.keys()), "Simulated Weights": list(normalized_monte_carlo_p.values())}).sort_values(by="Simulated Weights", ascending=False), use_container_width=True)
-
+            # Swapped target database reference to raw_monte_carlo_counts to display raw 2000+ hits
+            st.dataframe(pd.DataFrame({"Number": list(raw_monte_carlo_counts.keys()), "Simulated Hits": list(raw_monte_carlo_counts.values())}).sort_values(by="Simulated Hits", ascending=False), use_container_width=True)
     # RENDER COMPACT STRATEGIC BEST PICKS (4-8)
     st.subheader("🎯 Best 4–8 Ticket Picks Optimized Allocations")
     computed_best_picks_dictionary = extract_optimized_static_sets(final_hybrid_ai_scores)
@@ -668,15 +698,15 @@ elif selected_navigation_route == "Dashboard":
             st.markdown(f"<div class='ticket-card'><div class='number-grid'>{balls_render_string}</div></div>", unsafe_allow_html=True)
 
     # =====================================================
-    # SMART STRATEGY POOL SECTION MATRIX RENDERS
+    # SMART STRATEGY POOL SECTION TICKET GENERATOR
     # =====================================================
     st.subheader("🎟️ Smart Ticket Structural Pool Sections")
     
-    # Establish dynamic pool allocations exactly matching the verification system report rules
+    # Section pools calculated using the simulation-driven historical model
     strategic_section_pools_matrix = {
-        1: ranked_analytical_numbers[:10],       # Section 1: Top 10 High Confidence Hottest Pool
-        2: ranked_analytical_numbers[2:14],      # Section 2: Balanced Mix, Index Offset 2 to 14 Pool
-        3: ranked_analytical_numbers[4:18],      # Section 3: Wider Distribution Range 4 to 18 Pool
+        1: ranked_analytical_numbers[:10],       # Section 1: Hottest 10 Pool
+        2: ranked_analytical_numbers[2:14],      # Section 2: Balanced Matrix Offset
+        3: ranked_analytical_numbers[4:18],      # Section 3: Distribution Mid-Range
         4: ranked_analytical_numbers[6:24]       # Section 4: Exploration Matrix Sleeper Pool
     }
 
@@ -684,7 +714,7 @@ elif selected_navigation_route == "Dashboard":
         st.markdown(f"### Smart Strategy Pool Section {current_section_id}")
         designated_target_pool = strategic_section_pools_matrix[current_section_id]
         
-        # Calculate isolated probability matrices for current pool numbers
+        # Isolate probabilities for this specific pool
         isolated_pool_probabilities = {num: final_hybrid_ai_scores.get(num, 0.0) for num in designated_target_pool}
         normalized_pool_vector_weights = np.array(list(isolated_pool_probabilities.values()))
         
@@ -698,15 +728,14 @@ elif selected_navigation_route == "Dashboard":
         for visual_card_idx in range(8):
             target_ticket_ball_count = visual_card_idx + 1
             
-            # HOT NUMBER FORCING LAYER ROUTINE
-            selected_forced_hot_token = random.choice(ranked_analytical_numbers[:5])
+            # HOT FORCING: Force the #1 absolute historical anchor picked by the simulation
+            selected_forced_hot_token = ranked_analytical_numbers[0]
             
-            # Separate the forced token from the rest of the pool to ensure non-duplicate sampling
+            # Handle remainder of the pool safely to prevent any accidental ticket duplication
             remainder_section_pool = [num for num in designated_target_pool if num != selected_forced_hot_token]
             remainder_pool_weights = np.array([isolated_pool_probabilities[num] for num in remainder_section_pool])
             
             if remainder_pool_weights.sum() == 0 or len(remainder_section_pool) < (target_ticket_ball_count - 1):
-                # Fallback to standard selections if pool sizes fall below standard sampling thresholds
                 generated_ticket_sequence = sorted(np.random.choice(designated_target_pool, size=min(target_ticket_ball_count, len(designated_target_pool)), replace=False, p=normalized_pool_vector_weights))
             else:
                 remainder_pool_weights /= remainder_pool_weights.sum()
@@ -736,7 +765,6 @@ elif selected_navigation_route == "Dashboard":
             st.plotly_chart(network_topological_graph, use_container_width=True)
         else:
             st.info("Insufficient relational pair node densities currently available to map topologies.")
-
 # =====================================================
 # ROUTE RUNTIME: HISTORICAL ARCHIVE DATA TERMINAL (UNRESTRICTED)
 # =====================================================
